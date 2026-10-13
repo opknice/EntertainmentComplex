@@ -1,0 +1,16 @@
+{
+  "version": "2f587c221e2e1d049480-mv6qtpy0",
+  "catalogHash": "2f587c221e2e1d049480",
+  "proxyBaseUrl": "https://doowiseplay-proxy.kasthanakrit4.workers.dev",
+  "generatedAt": "2026-10-13T13:55:16.248Z",
+  "expiresAt": 1794491716248,
+  "total": 13818,
+  "sources": [
+    "77hd.m3u",
+    "movie285_all.m3u",
+    "ottmovie-series.m3u",
+    "playlistnolog.m3u"
+  ],
+  "changedSources": [],
+  "added": 0
+}

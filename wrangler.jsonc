@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "doowiseplay-proxy",
+  "main": "worker/src/index.ts",
+  "compatibility_date": "2026-10-13",
+  "upload_source_maps": true,
+  "vars": {
+    "ALLOWED_ORIGINS": "https://entertainment-complex-sable.vercel.app,http://127.0.0.1:4173,http://localhost:4173"
+  },
+  "secrets": {
+    "required": ["PROXY_SIGNING_KEY"]
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "head_sampling_rate": 1
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.01
+    }
+  }
+}

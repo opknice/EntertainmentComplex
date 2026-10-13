@@ -1,27 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 const PAGE_SIZE = 48;
-const emptyMeta = { total: 0, sources: [], groups: [], sync: null };
+const POLL_INTERVAL_MS = 15 * 60 * 1000;
+const emptyCatalog = { version: '', generatedAt: '', total: 0, sources: [], groups: [], items: [] };
 
 function formatSyncTime(value) {
   if (!value) return '';
   return new Intl.DateTimeFormat('th-TH', {
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
+    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
   }).format(new Date(value));
 }
 
-function SyncStatus({ sync }) {
-  if (!sync) return <span className="sync-pill"><span className="sync-dot" />กำลังเชื่อมต่อ</span>;
-  if (sync.syncing) return <span className="sync-pill is-syncing"><span className="sync-dot" />กำลังซิงก์ 4 แหล่ง…</span>;
-  if (sync.lastError) return <span className="sync-pill has-error" title={sync.lastError}><span className="sync-dot" />ซิงก์มีข้อผิดพลาด</span>;
-  const checked = formatSyncTime(sync.lastCheckedAt);
+function SyncStatus({ catalog, checking }) {
+  const generated = formatSyncTime(catalog.generatedAt);
   return (
-    <span className="sync-pill" title={checked ? `ตรวจล่าสุด ${checked}` : 'รอตรวจสอบครั้งแรก'}>
-      <span className="sync-dot" />อัปเดตอัตโนมัติทุก {sync.intervalMinutes} นาที
+    <span className={`sync-pill${checking ? ' is-syncing' : ''}`} title={generated ? `ข้อมูลล่าสุด ${generated}` : 'กำลังโหลดข้อมูล'}>
+      <span className="sync-dot" />{checking ? 'กำลังตรวจข้อมูลใหม่…' : 'ตรวจข้อมูลใหม่ทุก 15 นาที'}
     </span>
   );
 }
@@ -45,9 +39,8 @@ function Player({ movie, onClose }) {
     let hls;
     let cancelled = false;
     setStatus('กำลังเชื่อมต่อสตรีม…');
-
     const ready = () => setStatus('พร้อมเล่น');
-    const failed = () => setStatus('เบราว์เซอร์นี้ไม่รองรับรูปแบบวิดีโอ ลองเปิดไฟล์ M3U ใน VLC');
+    const failed = () => setStatus('เบราว์เซอร์นี้ไม่รองรับรูปแบบวิดีโอ');
 
     async function setupPlayer() {
       const { default: Hls } = await import('hls.js');
@@ -72,7 +65,6 @@ function Player({ movie, onClose }) {
     }
 
     setupPlayer().catch(() => setStatus('โหลดเครื่องเล่นไม่สำเร็จ'));
-
     return () => {
       cancelled = true;
       hls?.destroy();
@@ -86,26 +78,15 @@ function Player({ movie, onClose }) {
   return (
     <section className="player-shell" aria-label="เครื่องเล่นวิดีโอ">
       <div className="player-topbar">
-        <div>
-          <span className="eyebrow">กำลังรับชม</span>
-          <h2>{movie.title}</h2>
-        </div>
+        <div><span className="eyebrow">กำลังรับชม</span><h2>{movie.title}</h2></div>
         <button className="icon-button" type="button" onClick={onClose} aria-label="ปิดเครื่องเล่น">×</button>
       </div>
-      <div className="video-frame">
-        <video ref={videoRef} controls playsInline poster={movie.logo || undefined} />
-      </div>
+      <div className="video-frame"><video ref={videoRef} controls playsInline poster={movie.logo || undefined} /></div>
       <div className="player-meta">
-        <span className="status-dot" />
-        <span>{status}</span>
-        <span className="meta-separator">•</span>
-        <span>{movie.source}</span>
-        {movie.requiresReferer && <span className="badge">ผ่าน secure proxy</span>}
+        <span className="status-dot" /><span>{status}</span><span className="meta-separator">•</span>
+        <span>{movie.source}</span><span className="badge">ผ่าน secure proxy</span>
       </div>
-      <details>
-        <summary>รายละเอียดลิงก์</summary>
-        <p className="direct-url">{movie.directUrl}</p>
-      </details>
+      <details><summary>รายละเอียดลิงก์</summary><p className="direct-url">{movie.directUrl}</p></details>
     </section>
   );
 }
@@ -114,141 +95,133 @@ function MovieCard({ movie, onPlay }) {
   return (
     <article className="movie-card">
       <button className="poster-button" type="button" onClick={() => onPlay(movie.id)} aria-label={`เล่น ${movie.title}`}>
-        {movie.logo ? (
-          <img src={movie.logo} alt="" loading="lazy" referrerPolicy="no-referrer" />
-        ) : (
-          <div className="poster-fallback"><span>▶</span></div>
-        )}
+        {movie.logo ? <img src={movie.logo} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <div className="poster-fallback"><span>▶</span></div>}
         <span className="play-chip">▶ เล่น</span>
       </button>
       <div className="card-body">
         <h3 title={movie.title}>{movie.title}</h3>
-        <div className="card-meta">
-          <span>{movie.streamType}</span>
-          <span>{movie.source.replace('.m3u', '')}</span>
-        </div>
+        <div className="card-meta"><span>{movie.streamType}</span><span>{movie.source.replace('.m3u', '')}</span></div>
       </div>
     </article>
   );
 }
 
+async function fetchJson(pathname) {
+  const separator = pathname.includes('?') ? '&' : '?';
+  const response = await fetch(`${pathname}${separator}t=${Date.now()}`, { cache: 'no-store' });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
 export default function App() {
-  const [meta, setMeta] = useState(emptyMeta);
+  const [catalog, setCatalog] = useState(emptyCatalog);
   const [query, setQuery] = useState('');
   const [source, setSource] = useState('');
   const [page, setPage] = useState(1);
-  const [result, setResult] = useState({ total: 0, items: [] });
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [checking, setChecking] = useState(false);
   const [error, setError] = useState('');
-  const [catalogVersion, setCatalogVersion] = useState(0);
   const [syncNotice, setSyncNotice] = useState('');
   const debouncedQuery = useDebounced(query);
+  const versionRef = useRef('');
 
   useEffect(() => {
-    fetch('/api/meta').then((response) => response.json()).then(setMeta).catch(() => setError('โหลดข้อมูลภาพรวมไม่สำเร็จ'));
+    let cancelled = false;
+    fetchJson('/data/catalog.json').then((data) => {
+      if (cancelled) return;
+      versionRef.current = data.version;
+      setCatalog(data);
+    }).catch(() => {
+      if (!cancelled) setError('โหลดรายการหนังไม่สำเร็จ');
+    }).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
-    const updates = new EventSource('/api/updates');
+    let cancelled = false;
     let noticeTimer;
-    updates.onmessage = (event) => {
+    async function checkForUpdates() {
+      setChecking(true);
       try {
-        const update = JSON.parse(event.data);
-        setMeta((current) => ({
-          ...current,
-          total: update.total ?? current.total,
-          sources: update.sources ?? current.sources,
-          groups: update.groups ?? current.groups,
-          sync: update.sync ?? current.sync,
-        }));
-        if (update.kind === 'catalog-updated') {
-          setCatalogVersion((version) => version + 1);
-          const added = update.sync?.lastAdded || 0;
-          const changed = update.sync?.changedSources?.length || 0;
-          setSyncNotice(`อัปเดตคลังแล้ว: เพิ่ม ${added.toLocaleString('th-TH')} เรื่อง จาก ${changed} แหล่ง`);
+        const version = await fetchJson('/data/version.json');
+        if (!cancelled && version.version && versionRef.current && version.version !== versionRef.current) {
+          const nextCatalog = await fetchJson('/data/catalog.json');
+          if (cancelled) return;
+          versionRef.current = nextCatalog.version;
+          setCatalog(nextCatalog);
+          setSelected((current) => current ? nextCatalog.items.find((item) => item.id === current.id) || null : null);
+          setSyncNotice(`อัปเดตคลังแล้ว: ${nextCatalog.total.toLocaleString('th-TH')} เรื่อง`);
           window.clearTimeout(noticeTimer);
           noticeTimer = window.setTimeout(() => setSyncNotice(''), 8000);
         }
       } catch {
-        // EventSource reconnects automatically; keep the current catalog visible.
+        if (!cancelled) setError((current) => current || 'ตรวจข้อมูลอัปเดตไม่สำเร็จ ระบบจะลองใหม่อัตโนมัติ');
+      } finally {
+        if (!cancelled) setChecking(false);
       }
-    };
+    }
+    const interval = window.setInterval(checkForUpdates, POLL_INTERVAL_MS);
     return () => {
+      cancelled = true;
+      window.clearInterval(interval);
       window.clearTimeout(noticeTimer);
-      updates.close();
     };
   }, []);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-    if (debouncedQuery) params.set('q', debouncedQuery);
-    if (source) params.set('source', source);
-    setLoading(true);
-    setError('');
-    fetch(`/api/movies?${params}`, { signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error('request failed');
-        return response.json();
-      })
-      .then(setResult)
-      .catch((requestError) => {
-        if (requestError.name !== 'AbortError') setError('โหลดรายการหนังไม่สำเร็จ');
-      })
-      .finally(() => setLoading(false));
-    return () => controller.abort();
-  }, [debouncedQuery, source, page, catalogVersion]);
-
   useEffect(() => setPage(1), [debouncedQuery, source]);
 
-  async function playMovie(id) {
-    setError('');
-    try {
-      const response = await fetch(`/api/movies/${id}`);
-      if (!response.ok) throw new Error('request failed');
-      setSelected(await response.json());
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } catch {
+  const filteredItems = useMemo(() => {
+    const normalizedQuery = debouncedQuery.trim().toLocaleLowerCase('th');
+    return catalog.items.filter((movie) => {
+      if (source && movie.source !== source) return false;
+      return !normalizedQuery || movie.title.toLocaleLowerCase('th').includes(normalizedQuery);
+    });
+  }, [catalog.items, debouncedQuery, source]);
+  const pageCount = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const visibleItems = filteredItems.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  useEffect(() => {
+    if (page > pageCount) setPage(pageCount);
+  }, [page, pageCount]);
+
+  function playMovie(id) {
+    const movie = catalog.items.find((item) => item.id === id);
+    if (!movie) {
       setError('เปิดรายการนี้ไม่สำเร็จ');
+      return;
     }
+    setError('');
+    setSelected(movie);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  const pageCount = Math.max(1, Math.ceil(result.total / PAGE_SIZE));
   const range = useMemo(() => {
-    if (!result.total) return '0 รายการ';
-    const start = (page - 1) * PAGE_SIZE + 1;
-    const end = Math.min(page * PAGE_SIZE, result.total);
-    return `${start.toLocaleString('th-TH')}–${end.toLocaleString('th-TH')} จาก ${result.total.toLocaleString('th-TH')}`;
-  }, [page, result.total]);
+    if (!filteredItems.length) return '0 รายการ';
+    const start = (safePage - 1) * PAGE_SIZE + 1;
+    const end = Math.min(safePage * PAGE_SIZE, filteredItems.length);
+    return `${start.toLocaleString('th-TH')}–${end.toLocaleString('th-TH')} จาก ${filteredItems.length.toLocaleString('th-TH')}`;
+  }, [safePage, filteredItems.length]);
 
   return (
     <div className="app-shell">
       <header className="hero">
         <nav>
           <div className="brand"><span className="brand-mark">D</span><span>Doowise Play</span></div>
-          <div className="nav-status">
-            <SyncStatus sync={meta.sync} />
-            <span className="library-count">คลัง {meta.total.toLocaleString('th-TH')} เรื่อง</span>
-          </div>
+          <div className="nav-status"><SyncStatus catalog={catalog} checking={checking} /><span className="library-count">คลัง {catalog.total.toLocaleString('th-TH')} เรื่อง</span></div>
         </nav>
-        <div className="hero-copy">
-          <span className="eyebrow">PRIVATE MOVIE LIBRARY</span>
-          <h1>คืนนี้ดูเรื่องอะไรดี?</h1>
-          <p>ค้นหาและเปิดลิงก์จากคลัง M3U/CSV ของคุณในหน้าจอเดียว</p>
-        </div>
+        <div className="hero-copy"><span className="eyebrow">PRIVATE MOVIE LIBRARY</span><h1>คืนนี้ดูเรื่องอะไรดี?</h1><p>ค้นหาและเปิดลิงก์จากคลัง M3U/CSV ของคุณในหน้าจอเดียว</p></div>
         <div className="search-panel">
           <label className="search-box">
-            <span aria-hidden="true">⌕</span>
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาชื่อหนัง…" />
+            <span aria-hidden="true">⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาชื่อหนัง…" />
             {query && <button type="button" onClick={() => setQuery('')} aria-label="ล้างการค้นหา">×</button>}
           </label>
           <label className="select-box">
             <span>แหล่งข้อมูล</span>
-            <select value={source} onChange={(event) => setSource(event.target.value)}>
-              <option value="">ทุกแหล่ง</option>
-              {meta.sources.map((item) => <option key={item} value={item}>{item}</option>)}
-            </select>
+            <select value={source} onChange={(event) => setSource(event.target.value)}><option value="">ทุกแหล่ง</option>{catalog.sources.map((item) => <option key={item} value={item}>{item}</option>)}</select>
           </label>
         </div>
       </header>
@@ -256,39 +229,25 @@ export default function App() {
       <main>
         {syncNotice && <div className="sync-notice" role="status">✓ {syncNotice}</div>}
         {selected && <Player movie={selected} onClose={() => setSelected(null)} />}
-
         <div className="section-heading">
-          <div>
-            <span className="eyebrow">รายการหนัง</span>
-            <h2>{query ? `ผลการค้นหา “${debouncedQuery}”` : source || 'หนังทั้งหมด'}</h2>
-          </div>
+          <div><span className="eyebrow">รายการหนัง</span><h2>{query ? `ผลการค้นหา “${debouncedQuery}”` : source || 'หนังทั้งหมด'}</h2></div>
           <span className="result-range">{range}</span>
         </div>
-
         {error && <div className="error-banner" role="alert">{error}</div>}
         {loading ? (
-          <div className="loading-grid" aria-label="กำลังโหลด">
-            {Array.from({ length: 12 }, (_, index) => <div className="skeleton" key={index} />)}
-          </div>
-        ) : result.items.length ? (
-          <div className="movie-grid">
-            {result.items.map((movie) => <MovieCard key={movie.id} movie={movie} onPlay={playMovie} />)}
-          </div>
+          <div className="loading-grid" aria-label="กำลังโหลด">{Array.from({ length: 12 }, (_, index) => <div className="skeleton" key={index} />)}</div>
+        ) : visibleItems.length ? (
+          <div className="movie-grid">{visibleItems.map((movie) => <MovieCard key={movie.id} movie={movie} onPlay={playMovie} />)}</div>
         ) : (
           <div className="empty-state"><span>⌕</span><h3>ไม่พบหนังที่ค้นหา</h3><p>ลองใช้คำค้นสั้นลงหรือเลือกแหล่งข้อมูลอื่น</p></div>
         )}
-
         <div className="pagination" aria-label="เปลี่ยนหน้า">
-          <button type="button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>← ก่อนหน้า</button>
-          <span>หน้า {page.toLocaleString('th-TH')} / {pageCount.toLocaleString('th-TH')}</span>
-          <button type="button" disabled={page >= pageCount} onClick={() => setPage((value) => value + 1)}>ถัดไป →</button>
+          <button type="button" disabled={safePage <= 1} onClick={() => setPage((value) => value - 1)}>← ก่อนหน้า</button>
+          <span>หน้า {safePage.toLocaleString('th-TH')} / {pageCount.toLocaleString('th-TH')}</span>
+          <button type="button" disabled={safePage >= pageCount} onClick={() => setPage((value) => value + 1)}>ถัดไป →</button>
         </div>
       </main>
-
-      <footer>
-        <span>Doowise Play</span>
-        <span>เล่นสตรีมผ่าน local proxy เพื่อคงค่า Referer จากไฟล์ M3U</span>
-      </footer>
+      <footer><span>Doowise Play</span><span>รายการอัปเดตอัตโนมัติทุก 15 นาที · เล่นผ่าน Cloudflare secure proxy</span></footer>
     </div>
   );
 }

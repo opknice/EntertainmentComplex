@@ -4,19 +4,25 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node server.mjs --dev",
+    "dev": "vite --host 127.0.0.1 --port 4173",
     "build": "vite build",
-    "start": "node server.mjs"
+    "preview": "vite preview --host 127.0.0.1 --port 4173",
+    "start": "npm run preview",
+    "sync:catalog": "node scripts/sync-catalog.mjs",
+    "worker:types": "wrangler types worker/worker-configuration.d.ts",
+    "worker:check": "npm run worker:types && tsc --noEmit && wrangler deploy --dry-run"
   },
   "dependencies": {
     "csv-parse": "^7.0.3",
-    "express": "^5.1.0",
     "hls.js": "^1.6.13",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261013.1",
     "@vitejs/plugin-react": "^5.0.4",
-    "vite": "^7.1.9"
+    "typescript": "^7.0.2",
+    "vite": "^7.1.9",
+    "wrangler": "^4.150.0"
   }
 }
