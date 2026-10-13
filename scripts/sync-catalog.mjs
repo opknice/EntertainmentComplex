@@ -161,7 +161,7 @@ function csvCell(value) {
 function serializeCsv(items) {
   const rows = [['title', 'url', 'referer', 'user_agent', 'source', 'group', 'logo'].map(csvCell).join(',')];
   for (const item of items) rows.push([item.title, item.url, item.referer, item.userAgent, item.source, item.group, item.logo].map(csvCell).join(','));
-  return `\uFEFF${rows.join('\r\n')}\r\n`;
+  return `\uFEFF${rows.join('\n')}\n`;
 }
 
 function serializeM3u(items) {
