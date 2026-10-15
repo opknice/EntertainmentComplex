@@ -25,6 +25,12 @@ const sportsFeeds = [
   ['hockey', '/api/hockey/fixtures'],
   ['nfl', '/api/nfl/fixtures'],
 ];
+const sportsHeaders = {
+  'User-Agent': sportsUserAgent,
+  Origin: sportsBase,
+  Referer: `${sportsBase}/`,
+  Accept: 'application/json',
+};
 
 loadLocalEnv();
 
@@ -302,39 +308,46 @@ function flattenFixturePayload(payload) {
   return Object.values(payload).flatMap((value) => Array.isArray(value) ? value : []);
 }
 
-async function fetchSports() {
+async function fetchSports(previousSports = []) {
   const results = [];
   for (const [sport, pathname] of sportsFeeds) {
-    const response = await fetch(`${sportsBase}${pathname}`, {
-      headers: { 'User-Agent': sportsUserAgent },
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!response.ok) throw new Error(`โหลดตารางกีฬา ${sport} ไม่สำเร็จ (HTTP ${response.status})`);
-    for (const item of flattenFixturePayload(await response.json())) {
-      const home = item.teamhome?.name_th || item.teamhome?.name || '';
-      const away = item.teamaway?.name_th || item.teamaway?.name || '';
-      const channel = String(item.channel || '').trim();
-      if (!channel) continue;
-      const title = `${home} vs ${away}`.trim().replace(/^vs$|^\s*vs\s*/i, '') || String(item.title || channel);
-      const league = item.league_info?.name_th || item.league_info?.name || String(item.league_round || sport).split(' - ')[0];
-      results.push({
-        id: stableMovieId(`${sport}:${title}:${item.event_time || ''}`, channel),
-        title,
-        sport,
-        league: league || sport,
-        time: String(item.event_time || ''),
-        status: String(item.status_short || ''),
-        channel,
-        logo: item.teamhome?.logo || '',
-        awayLogo: item.teamaway?.logo || '',
+    try {
+      const response = await fetch(`${sportsBase}${pathname}`, {
+        headers: sportsHeaders,
+        signal: AbortSignal.timeout(30_000),
       });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      for (const item of flattenFixturePayload(await response.json())) {
+        const home = item.teamhome?.name_th || item.teamhome?.name || '';
+        const away = item.teamaway?.name_th || item.teamaway?.name || '';
+        const channel = String(item.channel || '').trim();
+        if (!channel) continue;
+        const title = `${home} vs ${away}`.trim().replace(/^vs$|^\s*vs\s*/i, '') || String(item.title || channel);
+        const league = item.league_info?.name_th || item.league_info?.name || String(item.league_round || sport).split(' - ')[0];
+        results.push({
+          id: stableMovieId(`${sport}:${title}:${item.event_time || ''}`, channel),
+          title,
+          sport,
+          league: league || sport,
+          time: String(item.event_time || ''),
+          status: String(item.status_short || ''),
+          channel,
+          logo: item.teamhome?.logo || '',
+          awayLogo: item.teamaway?.logo || '',
+        });
+      }
+    } catch (error) {
+      const fallback = previousSports.filter((item) => item.sport === sport);
+      console.warn(`โหลดตารางกีฬา ${sport} ไม่สำเร็จ (${error.message}); ใช้ข้อมูลเดิม ${fallback.length} รายการ`);
+      results.push(...fallback);
     }
   }
-  const eventsResponse = await fetch(`${sportsBase}/api/events`, {
-    headers: { 'User-Agent': sportsUserAgent },
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (eventsResponse.ok) {
+  try {
+    const eventsResponse = await fetch(`${sportsBase}/api/events`, {
+      headers: sportsHeaders,
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!eventsResponse.ok) throw new Error(`HTTP ${eventsResponse.status}`);
     for (const item of await eventsResponse.json()) {
       const channel = String(item.channel || '').trim();
       if (!channel) continue;
@@ -350,6 +363,10 @@ async function fetchSports() {
         awayLogo: '',
       });
     }
+  } catch (error) {
+    const fallback = previousSports.filter((item) => item.sport === 'event');
+    console.warn(`โหลดอีเวนต์กีฬาไม่สำเร็จ (${error.message}); ใช้ข้อมูลเดิม ${fallback.length} รายการ`);
+    results.push(...fallback);
   }
   return [...new Map(results.map((item) => [`${item.channel}\u0000${item.time}\u0000${item.title}`, item])).values()]
     .sort((a, b) => a.time.localeCompare(b.time) || a.sport.localeCompare(b.sport));
@@ -390,6 +407,7 @@ function catalogHash(items) {
 
 async function main() {
   const previousVersion = readJson(versionPath, null);
+  const previousCatalog = readJson(catalogPath, { sports: [] });
   const sourceState = readJson(statePath, {});
   const sourceList = await fetchSourceList();
   const changedSources = sourceList.movies.filter((source) => sourceState[source.name]?.fingerprint !== sourceFingerprint(source));
@@ -413,7 +431,7 @@ async function main() {
   }
 
   const movies = [...byIdentity.values()].sort((a, b) => a.title.localeCompare(b.title, 'th'));
-  const [liveChannels, sports] = await Promise.all([fetchLiveChannels(sourceList.live.name), fetchSports()]);
+  const [liveChannels, sports] = await Promise.all([fetchLiveChannels(sourceList.live.name), fetchSports(previousCatalog.sports)]);
   const contentHash = catalogHash([...movies, ...liveChannels, ...sports.map((item) => ({ ...item, url: item.channel, referer: '', logo: `${item.logo}|${item.awayLogo}` }))]);
   const now = Date.now();
   const linksNeedRotation = previousVersion?.catalogHash !== contentHash
