@@ -16,7 +16,8 @@
     "csv-parse": "^7.0.3",
     "hls.js": "^1.6.13",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "shaka-player": "^4.16.52"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261013.1",

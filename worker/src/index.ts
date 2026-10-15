@@ -3,8 +3,11 @@ const textEncoder = new TextEncoder();
 
 type MediaPayload = {
   u: string;
+  c?: string;
   r: string;
   a: string;
+  h?: Record<string, string>;
+  o?: string[];
   e: number;
 };
 
@@ -50,8 +53,20 @@ function decodePayload(encoded: string): MediaPayload {
   if (typeof record.u !== 'string' || typeof record.r !== 'string' || typeof record.a !== 'string' || typeof record.e !== 'number') {
     throw new Error('invalid payload');
   }
-  if (record.u.length > 8_192 || record.r.length > 2_048 || record.a.length > 512) throw new Error('payload too large');
-  return { u: record.u, r: record.r, a: record.a, e: record.e };
+  if (typeof record.c !== 'undefined' && typeof record.c !== 'string') throw new Error('invalid payload');
+  if (typeof record.h !== 'undefined' && (!record.h || typeof record.h !== 'object' || Array.isArray(record.h))) throw new Error('invalid payload');
+  if (typeof record.o !== 'undefined' && (!Array.isArray(record.o) || record.o.length > 8 || record.o.some((origin) => typeof origin !== 'string' || origin.length > 512))) {
+    throw new Error('invalid payload');
+  }
+  if (record.u.length > 8_192 || record.r.length > 2_048 || record.a.length > 512 || String(record.c || '').length > 256) throw new Error('payload too large');
+  const headers: Record<string, string> = {};
+  for (const [name, value] of Object.entries((record.h || {}) as Record<string, unknown>)) {
+    if (!/^[A-Za-z0-9-]{1,64}$/.test(name) || typeof value !== 'string' || value.length > 2_048) throw new Error('invalid headers');
+    if (!['authinfo', 'authorization', 'origin'].includes(name.toLowerCase())) continue;
+    headers[name] = value;
+  }
+  const origins = (record.o || []).map((origin) => validatedTarget(`${origin}/`).origin);
+  return { u: record.u, c: record.c as string | undefined, r: record.r, a: record.a, h: headers, o: [...new Set(origins)], e: record.e };
 }
 
 async function hmac(value: string, secret: string): Promise<ArrayBuffer> {
@@ -127,6 +142,18 @@ async function rewriteManifest(text: string, upstreamUrl: URL, payload: MediaPay
   return output.join('\n');
 }
 
+async function resolveChannel(channel: string): Promise<URL> {
+  if (!/^[A-Za-z0-9._-]{1,256}$/.test(channel)) throw new Error('invalid channel');
+  const response = await fetch(`https://dws-license.thmirror2.workers.dev/atmsign?ch=${encodeURIComponent(channel)}`, {
+    headers: { 'User-Agent': 'Doowiseplay' },
+    redirect: 'follow',
+  });
+  if (!response.ok) throw new Error(`channel lookup failed (${response.status})`);
+  const body = await response.json() as { ok?: boolean; url?: string };
+  if (!body.ok || !body.url) throw new Error('channel unavailable');
+  return validatedTarget(body.url);
+}
+
 async function readBoundedText(response: Response): Promise<string> {
   const declaredLength = Number(response.headers.get('Content-Length') || 0);
   if (declaredLength > MAX_MANIFEST_BYTES) throw new Error('manifest too large');
@@ -170,24 +197,37 @@ async function handleMedia(request: Request, env: Env, requestUrl: URL): Promise
   if (!(await verifySignature(encoded, signature, env.PROXY_SIGNING_KEY))) return jsonResponse(request, env, { error: 'invalid signature' }, 403);
   const payload = decodePayload(encoded);
   if (!Number.isFinite(payload.e) || payload.e < Date.now()) return jsonResponse(request, env, { error: 'link expired' }, 410);
-  const target = validatedTarget(payload.u);
+  const signedTarget = payload.c ? await resolveChannel(payload.c) : validatedTarget(payload.u);
+  const override = requestUrl.searchParams.get('u');
+  let target = signedTarget;
+  if (override) {
+    const candidate = validatedTarget(override);
+    const allowedOrigins = new Set([signedTarget.origin, ...(payload.o || [])]);
+    if (!allowedOrigins.has(candidate.origin)) return jsonResponse(request, env, { error: 'target origin mismatch' }, 403);
+    target = candidate;
+  }
   const upstreamHeaders = new Headers();
   if (payload.r) upstreamHeaders.set('Referer', payload.r);
   if (payload.a) upstreamHeaders.set('User-Agent', payload.a);
+  for (const [name, value] of Object.entries(payload.h || {})) upstreamHeaders.set(name, value);
   const range = request.headers.get('Range');
   if (range) upstreamHeaders.set('Range', range);
   const accept = request.headers.get('Accept');
   if (accept) upstreamHeaders.set('Accept', accept);
 
-  const upstream = await fetch(target, { method: request.method, headers: upstreamHeaders, redirect: 'follow' });
+  const upstreamRequest = new Request(target.href, { method: request.method, headers: upstreamHeaders, redirect: 'follow' });
+  if (payload.h?.Origin) upstreamRequest.headers.set('Origin', payload.h.Origin);
+  const upstream = await fetch(upstreamRequest, { cache: 'no-store' });
   const contentType = upstream.headers.get('Content-Type')?.toLowerCase() || '';
   const isManifest = contentType.includes('mpegurl') || /\.m3u8(?:$|\?)/i.test(target.href);
+  const isDashManifest = contentType.includes('dash+xml') || /\.mpd(?:$|\?)/i.test(target.href);
   const headers = copyResponseHeaders(upstream, request, env);
 
-  if (request.method === 'HEAD' || !isManifest || !upstream.ok) return new Response(upstream.body, { status: upstream.status, headers });
+  if (request.method === 'HEAD' || (!isManifest && !isDashManifest) || !upstream.ok) return new Response(upstream.body, { status: upstream.status, headers });
   const manifest = await readBoundedText(upstream);
-  const rewritten = await rewriteManifest(manifest, new URL(upstream.url || target.href), payload, env, requestUrl);
-  headers.set('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
+  const manifestUrl = new URL(upstream.url || target.href);
+  const rewritten = isDashManifest ? manifest : await rewriteManifest(manifest, manifestUrl, payload, env, requestUrl);
+  headers.set('Content-Type', isDashManifest ? 'application/dash+xml; charset=utf-8' : 'application/vnd.apple.mpegurl; charset=utf-8');
   headers.delete('Content-Length');
   headers.set('Cache-Control', 'private, max-age=30');
   return new Response(rewritten, { status: upstream.status, headers });

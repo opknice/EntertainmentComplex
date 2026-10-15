@@ -1,4 +1,4 @@
-name: Sync movie catalog
+name: Sync entertainment catalog
 
 on:
   schedule:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: sync-movie-catalog
+  group: sync-entertainment-catalog
   cancel-in-progress: false
 
 jobs:
@@ -28,7 +28,7 @@ jobs:
 
       - run: npm ci
 
-      - name: Refresh catalog from four sources
+      - name: Refresh movies, live TV, and sports
         run: npm run sync:catalog
         env:
           DOOWISE_MEMBER_ID: ${{ secrets.DOOWISE_MEMBER_ID }}
@@ -45,5 +45,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data public/data
-          git commit -m "Update movie catalog"
+          git commit -m "Update entertainment catalog"
           git push
