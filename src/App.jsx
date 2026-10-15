@@ -21,9 +21,16 @@ function formatEventTime(value) {
   return new Intl.DateTimeFormat('th-TH', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(date);
 }
 
-function SyncStatus({ catalog, checking }) {
+function SyncStatus({ catalog, checking, manualState, onManualUpdate }) {
   const generated = formatSyncTime(catalog.generatedAt);
-  return <span className={`sync-pill${checking ? ' is-syncing' : ''}`} title={generated ? `ข้อมูลล่าสุด ${generated}` : 'กำลังโหลดข้อมูล'}><span className="sync-dot" />{checking ? 'กำลังตรวจข้อมูลใหม่…' : 'ตรวจข้อมูลใหม่ทุก 15 นาที'}</span>;
+  const labels = {
+    requesting: 'กำลังส่งคำขอ…',
+    queued: 'กำลังอัปเดตจากทุกแหล่ง…',
+    cooldown: 'เพิ่งอัปเดต กรุณารอสักครู่',
+    error: 'อัปเดตไม่สำเร็จ ลองอีกครั้ง',
+  };
+  const busy = checking || manualState === 'requesting' || manualState === 'queued';
+  return <button type="button" className={`sync-pill${busy ? ' is-syncing' : ''}${manualState === 'error' ? ' has-error' : ''}`} title={generated ? `ข้อมูลล่าสุด ${generated} · กดเพื่ออัปเดตทันที` : 'กดเพื่ออัปเดตข้อมูลทันที'} onClick={onManualUpdate} disabled={busy || manualState === 'cooldown'}><span className="sync-dot" />{labels[manualState] || (checking ? 'กำลังตรวจข้อมูลใหม่…' : 'กดอัปเดตข้อมูล')}</button>;
 }
 
 function useDebounced(value, delay = 300) {
@@ -151,6 +158,7 @@ export default function App() {
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState('');
   const [syncNotice, setSyncNotice] = useState('');
+  const [manualState, setManualState] = useState('idle');
   const debouncedQuery = useDebounced(query);
   const versionRef = useRef('');
 
@@ -209,10 +217,54 @@ export default function App() {
   const activeMeta = sections.find((item) => item.id === section);
   const range = filteredItems.length ? `${((safePage - 1) * PAGE_SIZE + 1).toLocaleString('th-TH')}–${Math.min(safePage * PAGE_SIZE, filteredItems.length).toLocaleString('th-TH')} จาก ${filteredItems.length.toLocaleString('th-TH')}` : '0 รายการ';
 
+  async function reloadCatalog() {
+    const next = { ...emptyCatalog, ...await fetchJson('/data/catalog.json') };
+    versionRef.current = next.version;
+    setCatalog(next);
+    setSelected((current) => current ? allCatalogItems(next).find((item) => item.id === current.id) || null : null);
+  }
+
+  async function manualUpdate() {
+    setManualState('requesting');
+    setError('');
+    try {
+      const response = await fetch('/api/update-catalog', { method: 'POST', headers: { Accept: 'application/json' } });
+      const body = await response.json();
+      if (response.status === 429) {
+        setManualState('cooldown');
+        setSyncNotice('มีการอัปเดตอยู่แล้ว หรือเพิ่งอัปเดตภายใน 5 นาที');
+        window.setTimeout(() => setManualState('idle'), Math.min((body.retryAfter || 60) * 1000, 5 * 60 * 1000));
+        return;
+      }
+      if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+      setManualState('queued');
+      setSyncNotice('ส่งคำขอแล้ว กำลังดึงข้อมูลใหม่จากทุกแหล่ง');
+      const requestedAt = new Date(body.requestedAt).getTime();
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 5000));
+        const status = await fetchJson('/api/update-catalog');
+        const createdAt = status.run?.createdAt ? new Date(status.run.createdAt).getTime() : 0;
+        if (createdAt + 2000 < requestedAt || status.run?.status !== 'completed') continue;
+        if (status.run.conclusion !== 'success') throw new Error(`workflow ${status.run.conclusion || 'failed'}`);
+        await reloadCatalog();
+        setManualState('cooldown');
+        setSyncNotice('อัปเดตข้อมูลจากทุกแหล่งเรียบร้อยแล้ว');
+        window.setTimeout(() => setManualState('idle'), 5 * 60 * 1000);
+        return;
+      }
+      throw new Error('update timeout');
+    } catch (error) {
+      console.error('manual catalog update failed', error);
+      setManualState('error');
+      setError('สั่งอัปเดตข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+      window.setTimeout(() => setManualState('idle'), 8000);
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="hero">
-        <nav><div className="brand"><span className="brand-mark">D</span><span>Doowise Play</span></div><div className="nav-status"><SyncStatus catalog={catalog} checking={checking} /><span className="library-count">หนัง {catalog.total.toLocaleString('th-TH')} · ทีวี {catalog.liveTotal.toLocaleString('th-TH')} · กีฬา {catalog.sportsTotal.toLocaleString('th-TH')}</span></div></nav>
+        <nav><div className="brand"><span className="brand-mark">D</span><span>Doowise Play</span></div><div className="nav-status"><SyncStatus catalog={catalog} checking={checking} manualState={manualState} onManualUpdate={manualUpdate} /><span className="library-count">หนัง {catalog.total.toLocaleString('th-TH')} · ทีวี {catalog.liveTotal.toLocaleString('th-TH')} · กีฬา {catalog.sportsTotal.toLocaleString('th-TH')}</span></div></nav>
         <div className="hero-copy"><span className="eyebrow">PRIVATE ENTERTAINMENT HUB</span><h1>คืนนี้ดูอะไรดี?</h1><p>หนัง ทีวีสด และโปรแกรมกีฬา จาก Doowise Play ในหน้าจอเดียว</p></div>
         <div className="content-tabs" role="tablist" aria-label="ประเภทเนื้อหา">{sections.map((item) => <button key={item.id} type="button" role="tab" aria-selected={section === item.id} className={section === item.id ? 'active' : ''} onClick={() => setSection(item.id)}>{item.label}<span>{item.id === 'movies' ? catalog.total : item.id === 'live' ? catalog.liveTotal : catalog.sportsTotal}</span></button>)}</div>
         <div className="search-panel"><label className="search-box"><span aria-hidden="true">⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={section === 'sports' ? 'ค้นหาทีม ลีก หรือรายการกีฬา…' : 'ค้นหาชื่อรายการ…'} />{query && <button type="button" onClick={() => setQuery('')} aria-label="ล้างการค้นหา">×</button>}</label><label className="select-box"><span>{section === 'movies' ? 'แหล่งข้อมูล' : section === 'live' ? 'หมวดช่อง' : 'ชนิดกีฬา'}</span><select value={filter} onChange={(event) => setFilter(event.target.value)}><option value="">ทั้งหมด</option>{filterOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label></div>

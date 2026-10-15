@@ -43,7 +43,10 @@ nav { display: flex; align-items: center; justify-content: space-between; }
 .brand-mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; background: var(--red); box-shadow: 0 8px 32px rgba(255,59,48,.32); }
 .nav-status { display: flex; align-items: center; gap: 12px; }
 .library-count { color: var(--muted); font-size: 14px; }
-.sync-pill { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; color: #a7f3c3; border: 1px solid rgba(43,213,118,.2); border-radius: 999px; background: rgba(43,213,118,.08); font-size: 11px; white-space: nowrap; }
+.sync-pill { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; color: #a7f3c3; border: 1px solid rgba(43,213,118,.2); border-radius: 999px; background: rgba(43,213,118,.08); font-size: 11px; white-space: nowrap; cursor: pointer; transition: border-color .2s, background .2s, transform .2s; }
+.sync-pill:hover:not(:disabled) { border-color: rgba(43,213,118,.5); background: rgba(43,213,118,.14); transform: translateY(-1px); }
+.sync-pill:focus-visible { outline: 2px solid #2bd576; outline-offset: 3px; }
+.sync-pill:disabled { cursor: wait; opacity: .8; }
 .sync-dot { width: 7px; height: 7px; border-radius: 50%; background: #2bd576; box-shadow: 0 0 10px rgba(43,213,118,.65); }
 .sync-pill.is-syncing .sync-dot { animation: pulse 1s infinite alternate; }
 .sync-pill.has-error { color: #ffaaa5; border-color: rgba(255,59,48,.25); background: rgba(255,59,48,.09); }
