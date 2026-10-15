@@ -60,7 +60,7 @@ function Player({ item, onClose }) {
           if (type === shaka.net.NetworkingEngine.RequestType.MANIFEST) return;
           request.uris = request.uris.map((uri) => `${item.playUrl}&u=${encodeURIComponent(uri)}`);
         });
-        await shakaPlayer.load(item.playUrl);
+        await shakaPlayer.load(item.playUrl, null, 'application/dash+xml');
         if (!cancelled) {
           setStatus('พร้อมเล่น');
           video.play().catch(() => setStatus('กดปุ่มเล่นเพื่อเริ่มรับชม'));
@@ -89,7 +89,15 @@ function Player({ item, onClose }) {
       }
     }
 
-    setupPlayer().catch((error) => setStatus(error?.message === 'DASH_NOT_SUPPORTED' ? 'เบราว์เซอร์นี้ไม่รองรับ DASH' : 'โหลดสตรีมไม่สำเร็จ'));
+    setupPlayer().catch((error) => {
+      console.error('player setup failed', error);
+      if (error?.message === 'DASH_NOT_SUPPORTED') {
+        setStatus('เบราว์เซอร์นี้ไม่รองรับ DASH');
+        return;
+      }
+      const detail = error?.code || error?.message;
+      setStatus(`โหลดสตรีมไม่สำเร็จ${detail ? ` (${detail})` : ''}`);
+    });
     return () => {
       cancelled = true;
       hls?.destroy();
