@@ -1,12 +1,14 @@
 {
-  "name": "doowiseplay-movie-player",
+  "name": "entertainment-complex",
   "private": true,
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "predev": "npm run sync:catalog",
     "dev": "vite --host 127.0.0.1 --port 4173",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
+    "prestart": "npm run sync:catalog",
     "start": "npm run preview",
     "sync:catalog": "node scripts/sync-catalog.mjs",
     "worker:types": "wrangler types worker/worker-configuration.d.ts",

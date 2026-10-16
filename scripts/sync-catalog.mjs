@@ -25,6 +25,8 @@ const sportsFeeds = [
   ['hockey', '/api/hockey/fixtures'],
   ['nfl', '/api/nfl/fixtures'],
 ];
+const sportsLookbackMs = 8 * 60 * 60 * 1000;
+const sportsLookaheadMs = 48 * 60 * 60 * 1000;
 const sportsHeaders = {
   'User-Agent': sportsUserAgent,
   Origin: sportsBase,
@@ -36,7 +38,7 @@ loadLocalEnv();
 
 const memberId = process.env.DOOWISE_MEMBER_ID?.trim() || '';
 const signingKey = process.env.PROXY_SIGNING_KEY?.trim() || memberId;
-const proxyBaseUrl = (process.env.PROXY_BASE_URL || '').trim().replace(/\/$/, '');
+const proxyBaseUrl = (process.env.PROXY_BASE_URL || 'https://doowiseplay-proxy.kasthanakrit4.workers.dev').trim().replace(/\/$/, '');
 const sportsProxyBaseUrl = (process.env.SPORTS_PROXY_BASE_URL || '/api/sports').trim();
 
 if (!signingKey) throw new Error('ต้องตั้งค่า PROXY_SIGNING_KEY หรือ DOOWISE_MEMBER_ID');
@@ -80,6 +82,7 @@ function normalizeMovie(row) {
     source: String(row.source || 'unknown').trim(),
     group: String(row.group || '').trim(),
     logo: String(row.logo || '').trim(),
+    discoveredAt: String(row.discovered_at || row.discoveredAt || '').trim(),
   };
 }
 
@@ -232,8 +235,8 @@ function csvCell(value) {
 }
 
 function serializeCsv(items) {
-  const rows = [['title', 'url', 'referer', 'user_agent', 'source', 'group', 'logo'].map(csvCell).join(',')];
-  for (const item of items) rows.push([item.title, item.url, item.referer, item.userAgent, item.source, item.group, item.logo].map(csvCell).join(','));
+  const rows = [['title', 'url', 'referer', 'user_agent', 'source', 'group', 'logo', 'discovered_at'].map(csvCell).join(',')];
+  for (const item of items) rows.push([item.title, item.url, item.referer, item.userAgent, item.source, item.group, item.logo, item.discoveredAt].map(csvCell).join(','));
   return `\uFEFF${rows.join('\n')}\n`;
 }
 
@@ -308,8 +311,25 @@ function flattenFixturePayload(payload) {
   return Object.values(payload).flatMap((value) => Array.isArray(value) ? value : []);
 }
 
+function sportTimestamp(value) {
+  const text = String(value || '').trim();
+  if (!text) return Number.NaN;
+  const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text)
+    ? text.replace(' ', 'T')
+    : `${text.replace(' ', 'T')}+07:00`;
+  return Date.parse(normalized);
+}
+
+function isRelevantSport(item, now = Date.now()) {
+  if (['FT', 'Finished', 'Cancelled', 'Canceled', 'Postponed'].includes(String(item.status || ''))) return false;
+  const timestamp = sportTimestamp(item.time);
+  return !Number.isFinite(timestamp) || (timestamp >= now - sportsLookbackMs && timestamp <= now + sportsLookaheadMs);
+}
+
 async function fetchSports(previousSports = []) {
   const results = [];
+  const failures = [];
+  let fallbackCount = 0;
   for (const [sport, pathname] of sportsFeeds) {
     try {
       const response = await fetch(`${sportsBase}${pathname}`, {
@@ -337,8 +357,10 @@ async function fetchSports(previousSports = []) {
         });
       }
     } catch (error) {
-      const fallback = previousSports.filter((item) => item.sport === sport);
+      const fallback = previousSports.filter((item) => item.sport === sport && isRelevantSport(item));
       console.warn(`โหลดตารางกีฬา ${sport} ไม่สำเร็จ (${error.message}); ใช้ข้อมูลเดิม ${fallback.length} รายการ`);
+      failures.push({ source: sport, reason: error.message });
+      fallbackCount += fallback.length;
       results.push(...fallback);
     }
   }
@@ -364,12 +386,15 @@ async function fetchSports(previousSports = []) {
       });
     }
   } catch (error) {
-    const fallback = previousSports.filter((item) => item.sport === 'event');
+    const fallback = previousSports.filter((item) => item.sport === 'event' && isRelevantSport(item));
     console.warn(`โหลดอีเวนต์กีฬาไม่สำเร็จ (${error.message}); ใช้ข้อมูลเดิม ${fallback.length} รายการ`);
+    failures.push({ source: 'event', reason: error.message });
+    fallbackCount += fallback.length;
     results.push(...fallback);
   }
-  return [...new Map(results.map((item) => [`${item.channel}\u0000${item.time}\u0000${item.title}`, item])).values()]
+  const items = [...new Map(results.filter((item) => isRelevantSport(item)).map((item) => [`${item.channel}\u0000${item.time}\u0000${item.title}`, item])).values()]
     .sort((a, b) => a.time.localeCompare(b.time) || a.sport.localeCompare(b.sport));
+  return { items, failures, fallbackCount };
 }
 
 function signPlayUrl(movie, expiresAt) {
@@ -399,9 +424,10 @@ function signPlayUrl(movie, expiresAt) {
   return `${proxyBaseUrl}/v1/media?p=${encodeURIComponent(payload)}&s=${encodeURIComponent(signature)}`;
 }
 
-function catalogHash(items) {
+function catalogHash(items, status = '') {
   const digest = crypto.createHash('sha256');
   for (const item of items) digest.update(`${item.id}\u0000${item.title}\u0000${item.url}\u0000${item.referer}\u0000${item.logo}\u0000${JSON.stringify(item.headers || {})}\n`);
+  digest.update(status);
   return digest.digest('hex').slice(0, 20);
 }
 
@@ -413,14 +439,20 @@ async function main() {
   const changedSources = sourceList.movies.filter((source) => sourceState[source.name]?.fingerprint !== sourceFingerprint(source));
   const existingMovies = readCsv();
   const byIdentity = new Map(existingMovies.map((movie) => [`${movie.title}\u0000${movie.url}`, movie]));
+  const discoveredAt = new Date().toISOString();
+  const newlyAddedIds = [];
   let added = 0;
 
   for (const source of changedSources) {
     const incoming = await fetchSourceMovies(source.name);
     for (const movie of incoming) {
       const identity = `${movie.title}\u0000${movie.url}`;
-      if (!byIdentity.has(identity)) added += 1;
-      byIdentity.set(identity, movie);
+      const existing = byIdentity.get(identity);
+      if (!existing) {
+        added += 1;
+        newlyAddedIds.push(movie.id);
+      }
+      byIdentity.set(identity, { ...movie, discoveredAt: existing?.discoveredAt || (!existing ? discoveredAt : '') });
     }
     sourceState[source.name] = {
       size: source.size ?? null,
@@ -431,8 +463,17 @@ async function main() {
   }
 
   const movies = [...byIdentity.values()].sort((a, b) => a.title.localeCompare(b.title, 'th'));
-  const [liveChannels, sports] = await Promise.all([fetchLiveChannels(sourceList.live.name), fetchSports(previousCatalog.sports)]);
-  const contentHash = catalogHash([...movies, ...liveChannels, ...sports.map((item) => ({ ...item, url: item.channel, referer: '', logo: `${item.logo}|${item.awayLogo}` }))]);
+  const [liveChannels, sportsResult] = await Promise.all([fetchLiveChannels(sourceList.live.name), fetchSports(previousCatalog.sports)]);
+  const sports = sportsResult.items;
+  const sportsHealth = {
+    degraded: sportsResult.failures.length > 0,
+    failedSources: sportsResult.failures.map((failure) => failure.source),
+    fallbackCount: sportsResult.fallbackCount,
+  };
+  const contentHash = catalogHash(
+    [...movies, ...liveChannels, ...sports.map((item) => ({ ...item, url: item.channel, referer: '', logo: `${item.logo}|${item.awayLogo}` }))],
+    JSON.stringify(sportsHealth),
+  );
   const now = Date.now();
   const linksNeedRotation = previousVersion?.catalogHash !== contentHash
     || previousVersion?.proxyBaseUrl !== proxyBaseUrl
@@ -443,6 +484,8 @@ async function main() {
   const expiresAt = linksNeedRotation ? now + 30 * 24 * 60 * 60 * 1000 : previousVersion.expiresAt;
   const sources = [...new Set(movies.map((movie) => movie.source))].sort((a, b) => a.localeCompare(b));
   const groups = [...new Set(movies.map((movie) => movie.group).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'th'));
+  const currentIds = new Set(movies.map((movie) => movie.id));
+  const recent = [...new Set([...newlyAddedIds, ...(previousCatalog.recent || [])])].filter((id) => currentIds.has(id)).slice(0, 120);
   const items = movies.map((movie) => ({
     id: movie.id,
     title: movie.title,
@@ -453,6 +496,7 @@ async function main() {
     requiresReferer: Boolean(movie.referer),
     streamType: /\.m3u8(?:$|\?)/i.test(movie.url) ? 'HLS' : 'วิดีโอ',
     playUrl: signPlayUrl(movie, expiresAt),
+    discoveredAt: movie.discoveredAt || '',
   }));
   const live = liveChannels.map((channel) => ({
     id: channel.id,
@@ -472,7 +516,7 @@ async function main() {
     streamType: 'HLS',
     playUrl: `${sportsProxyBaseUrl}?ch=${encodeURIComponent(event.channel)}`,
   }));
-  const catalog = { version, generatedAt, total: items.length, liveTotal: live.length, sportsTotal: sportItems.length, sources, groups, items, live, sports: sportItems };
+  const catalog = { version, generatedAt, total: items.length, liveTotal: live.length, sportsTotal: sportItems.length, sportsHealth, sources, groups, recent, items, live, sports: sportItems };
   const versionDocument = linksNeedRotation ? {
     version,
     catalogHash: contentHash,
@@ -482,9 +526,11 @@ async function main() {
     total: items.length,
     liveTotal: live.length,
     sportsTotal: sportItems.length,
+    sportsHealth,
     sources,
     changedSources: changedSources.map((source) => source.name),
     added,
+    recent,
   } : previousVersion;
 
   writeAtomic(csvPath, serializeCsv(movies));
@@ -493,7 +539,7 @@ async function main() {
   writeAtomic(catalogPath, `${JSON.stringify(catalog)}\n`);
   writeAtomic(versionPath, `${JSON.stringify(versionDocument, null, 2)}\n`);
 
-  console.log(JSON.stringify({ version, total: movies.length, changedSources: versionDocument.changedSources, added }));
+  console.log(JSON.stringify({ version, total: movies.length, liveTotal: live.length, sportsTotal: sportItems.length, sportsHealth, changedSources: versionDocument.changedSources, added }));
 }
 
 await main();

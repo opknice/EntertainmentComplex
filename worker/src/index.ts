@@ -20,8 +20,22 @@ function corsHeaders(request: Request, env: Env): Headers {
     'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges, Content-Type',
     'Vary': 'Origin',
   });
-  if (allowed.includes(origin)) headers.set('Access-Control-Allow-Origin', origin);
+  if (allowed.includes(origin) || isLocalDevelopmentOrigin(origin)) headers.set('Access-Control-Allow-Origin', origin);
   return headers;
+}
+
+function isLocalDevelopmentOrigin(origin: string): boolean {
+  try {
+    const url = new URL(origin);
+    const port = Number(url.port);
+    return url.protocol === 'http:'
+      && ['localhost', '127.0.0.1'].includes(url.hostname)
+      && Number.isInteger(port)
+      && port > 0
+      && port <= 65_535;
+  } catch {
+    return false;
+  }
 }
 
 function jsonResponse(request: Request, env: Env, body: unknown, status = 200): Response {
