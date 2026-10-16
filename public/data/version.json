@@ -1,16 +1,22 @@
 {
-  "version": "82a30909404016b12b7a-mvaix9lw",
-  "catalogHash": "82a30909404016b12b7a",
+  "version": "ce462334bd2eecbb5db5-mvakdrzx",
+  "catalogHash": "ce462334bd2eecbb5db5",
   "proxyBaseUrl": "https://doowiseplay-proxy.kasthanakrit4.workers.dev",
-  "generatedAt": "2026-10-16T05:25:09.476Z",
-  "expiresAt": 1794720309476,
+  "generatedAt": "2026-10-16T06:05:59.421Z",
+  "expiresAt": 1794722759421,
   "total": 13854,
   "liveTotal": 102,
   "sportsTotal": 265,
   "sportsHealth": {
-    "degraded": false,
-    "failedSources": [],
-    "fallbackCount": 0
+    "degraded": true,
+    "failedSources": [
+      "football",
+      "volleyball",
+      "hockey",
+      "nfl",
+      "event"
+    ],
+    "fallbackCount": 265
   },
   "sources": [
     "77hd.m3u",
@@ -18,11 +24,8 @@
     "ottmovie-series.m3u",
     "playlistnolog.m3u"
   ],
-  "changedSources": [
-    "ottmovie-series.m3u",
-    "playlistnolog.m3u"
-  ],
-  "added": 9,
+  "changedSources": [],
+  "added": 0,
   "recent": [
     "CZ4UBv35wCoj7qLsJSoQa1",
     "NPQyBtG7CiYsOoOWpUR0ll",
