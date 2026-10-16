@@ -115,7 +115,7 @@ function isPrivateHostname(hostname: string): boolean {
 
 function validatedTarget(value: string): URL {
   const url = new URL(value);
-  if (url.protocol !== 'https:' || isPrivateHostname(url.hostname)) throw new Error('target not allowed');
+  if (!['https:', 'http:'].includes(url.protocol) || isPrivateHostname(url.hostname)) throw new Error('target not allowed');
   return url;
 }
 

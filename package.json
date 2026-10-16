@@ -11,6 +11,7 @@
     "prestart": "npm run sync:catalog",
     "start": "npm run preview",
     "sync:catalog": "node scripts/sync-catalog.mjs",
+    "sync:ott": "node scripts/sync-catalog.mjs --ott-only",
     "worker:types": "wrangler types worker/worker-configuration.d.ts",
     "worker:check": "npm run worker:types && tsc --noEmit && wrangler deploy --dry-run"
   },

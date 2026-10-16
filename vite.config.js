@@ -1,8 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { handleSportsRequest } from './lib/sports-proxy.js';
-
-const developmentBackend = process.env.VITE_DEV_BACKEND_ORIGIN || 'https://entertainment-complex-sable.vercel.app';
+import { catalogSyncPlugin } from './lib/catalog-sync-dev.js';
 
 function sportsApi() {
   return {
@@ -28,11 +27,8 @@ function sportsApi() {
 }
 
 export default defineConfig({
-  plugins: [react(), sportsApi()],
+  plugins: [react(), sportsApi(), catalogSyncPlugin()],
   server: {
     host: '127.0.0.1',
-    proxy: {
-      '/api/update-catalog': { target: developmentBackend, changeOrigin: true },
-    },
   },
 });

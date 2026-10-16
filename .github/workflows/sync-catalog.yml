@@ -28,10 +28,11 @@ jobs:
 
       - run: npm ci
 
-      - name: Refresh movies, live TV, and sports
+      - name: Refresh movies, live TV, sports, and OTT
         run: npm run sync:catalog
         env:
           DOOWISE_MEMBER_ID: ${{ secrets.DOOWISE_MEMBER_ID }}
+          OTT_PLAYLIST_ID: ${{ secrets.OTT_PLAYLIST_ID }}
           PROXY_SIGNING_KEY: ${{ secrets.DOOWISE_MEMBER_ID }}
           PROXY_BASE_URL: https://doowiseplay-proxy.kasthanakrit4.workers.dev
 

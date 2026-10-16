@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'csv-parse/sync';
+import { syncOttCatalog } from './ott-catalog.mjs';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dataDir = path.join(rootDir, 'data');
@@ -463,7 +464,7 @@ async function main() {
   }
 
   const movies = [...byIdentity.values()].sort((a, b) => a.title.localeCompare(b.title, 'th'));
-  const [liveChannels, sportsResult] = await Promise.all([fetchLiveChannels(sourceList.live.name), fetchSports(previousCatalog.sports)]);
+  const [liveChannels, sportsResult, ottSummary] = await Promise.all([fetchLiveChannels(sourceList.live.name), fetchSports(previousCatalog.sports), syncOttCatalog({ rootDir, signPlayUrl, proxyBaseUrl })]);
   const sports = sportsResult.items;
   const sportsHealth = {
     degraded: sportsResult.failures.length > 0,
@@ -472,7 +473,7 @@ async function main() {
   };
   const contentHash = catalogHash(
     [...movies, ...liveChannels, ...sports.map((item) => ({ ...item, url: item.channel, referer: '', logo: `${item.logo}|${item.awayLogo}` }))],
-    JSON.stringify(sportsHealth),
+    JSON.stringify({ sportsHealth, ottVersion: ottSummary.version, ottDegraded: ottSummary.degraded }),
   );
   const now = Date.now();
   const linksNeedRotation = previousVersion?.catalogHash !== contentHash
@@ -516,7 +517,7 @@ async function main() {
     streamType: 'HLS',
     playUrl: `${sportsProxyBaseUrl}?ch=${encodeURIComponent(event.channel)}`,
   }));
-  const catalog = { version, generatedAt, total: items.length, liveTotal: live.length, sportsTotal: sportItems.length, sportsHealth, sources, groups, recent, items, live, sports: sportItems };
+  const catalog = { version, generatedAt, total: items.length, liveTotal: live.length, sportsTotal: sportItems.length, ottTotal: ottSummary.total, ottSummary, sportsHealth, sources, groups, recent, items, live, sports: sportItems };
   const versionDocument = linksNeedRotation ? {
     version,
     catalogHash: contentHash,
@@ -526,6 +527,8 @@ async function main() {
     total: items.length,
     liveTotal: live.length,
     sportsTotal: sportItems.length,
+    ottTotal: ottSummary.total,
+    ottSummary,
     sportsHealth,
     sources,
     changedSources: changedSources.map((source) => source.name),
@@ -542,4 +545,16 @@ async function main() {
   console.log(JSON.stringify({ version, total: movies.length, liveTotal: live.length, sportsTotal: sportItems.length, sportsHealth, changedSources: versionDocument.changedSources, added }));
 }
 
-await main();
+if (process.argv.includes('--ott-only')) {
+  const ottSummary = await syncOttCatalog({ rootDir, signPlayUrl, proxyBaseUrl });
+  const previous = readJson(catalogPath, null);
+  const versionDocument = readJson(versionPath, null);
+  if (!previous || !versionDocument) throw new Error('Run the complete catalog sync first');
+  if (previous.ottSummary?.version !== ottSummary.version || previous.ottSummary?.degraded !== ottSummary.degraded) {
+    const version = crypto.createHash('sha256').update(`${previous.version}:${ottSummary.version}:${ottSummary.degraded}`).digest('hex').slice(0, 24);
+    writeAtomic(catalogPath, JSON.stringify({ ...previous, version, ottTotal: ottSummary.total, ottSummary }));
+    writeAtomic(versionPath, JSON.stringify({ ...versionDocument, version, ottTotal: ottSummary.total, ottSummary }, null, 2));
+  }
+} else {
+  await main();
+}

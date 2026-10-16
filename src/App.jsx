@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useOttCatalog } from './useOttCatalog';
 
 const PAGE_SIZE = 30;
 const POLL_INTERVAL_MS = 15 * 60 * 1000;
 const emptyCatalog = {
-  version: '', generatedAt: '', total: 0, liveTotal: 0, sportsTotal: 0,
+  version: '', generatedAt: '', total: 0, liveTotal: 0, sportsTotal: 0, ottTotal: 0,
   sportsHealth: { degraded: false, failedSources: [], fallbackCount: 0 },
-  sources: [], groups: [], recent: [], items: [], live: [], sports: [],
+  sources: [], groups: [], recent: [], items: [], live: [], sports: [], ott: [],
 };
 
 const sections = {
   movies: { label: 'หนัง', eyebrow: 'MOVIES', collection: 'items', filterLabel: 'แหล่งข้อมูล' },
   live: { label: 'ทีวีสด', eyebrow: 'LIVE TV', collection: 'live', filterLabel: 'หมวดช่อง' },
   sports: { label: 'กีฬาสด', eyebrow: 'LIVE SPORTS', collection: 'sports', filterLabel: 'ชนิดกีฬา' },
+  ott: { label: 'OTT', eyebrow: 'OTT PLAYLIST', collection: 'ott', filterLabel: 'หมวดต้นทาง' },
 };
 
 function formatSyncTime(value) {
@@ -43,7 +45,7 @@ function displayTitle(item) {
 }
 
 function allCatalogItems(catalog) {
-  return [...catalog.items, ...catalog.live, ...catalog.sports];
+  return [...catalog.items, ...catalog.live, ...catalog.sports, ...(catalog.ott || [])];
 }
 
 function getSectionItems(catalog, section) {
@@ -51,6 +53,7 @@ function getSectionItems(catalog, section) {
 }
 
 function getItemSection(catalog, id) {
+  if (id.startsWith('ott-')) return 'ott';
   if (catalog.items.some((item) => item.id === id)) return 'movies';
   if (catalog.live.some((item) => item.id === id)) return 'live';
   if (catalog.sports.some((item) => item.id === id)) return 'sports';
@@ -155,7 +158,7 @@ function useCatalog() {
         const version = await fetchJson('/data/version.json');
         if (!cancelled && version.version && versionRef.current && version.version !== versionRef.current) {
           const next = applyCatalog(await fetchJson('/data/catalog.json'));
-          setSyncNotice(`อัปเดตคลังแล้ว · หนัง ${next.total.toLocaleString('th-TH')} · ทีวี ${next.liveTotal.toLocaleString('th-TH')} · กีฬา ${next.sportsTotal.toLocaleString('th-TH')}`);
+          setSyncNotice(`อัปเดตคลังแล้ว · หนัง ${next.total.toLocaleString('th-TH')} · ทีวี ${next.liveTotal.toLocaleString('th-TH')} · กีฬา ${next.sportsTotal.toLocaleString('th-TH')} · OTT ${next.ottTotal.toLocaleString('th-TH')}`);
           window.clearTimeout(noticeTimer);
           noticeTimer = window.setTimeout(() => setSyncNotice(''), 8000);
         }
@@ -193,7 +196,7 @@ function useCatalog() {
         if (status.run.conclusion !== 'success') throw new Error(`workflow ${status.run.conclusion || 'failed'}`);
         const next = applyCatalog(await fetchJson('/data/catalog.json'));
         setManualState('cooldown');
-        setSyncNotice(`อัปเดตแล้ว พบหนัง ${next.total.toLocaleString('th-TH')} เรื่อง`);
+        setSyncNotice(`อัปเดตแล้ว · หนัง ${next.total.toLocaleString('th-TH')} · ทีวี ${next.liveTotal.toLocaleString('th-TH')} · กีฬา ${next.sportsTotal.toLocaleString('th-TH')} · OTT ${next.ottTotal.toLocaleString('th-TH')}`);
         window.setTimeout(() => setManualState('idle'), 5 * 60 * 1000);
         return;
       }
@@ -285,7 +288,7 @@ function Poster({ item, className = '' }) {
 function MediaCard({ item, section, compact = false, onPlay }) {
   const title = displayTitle(item);
   return (
-    <article className={`media-card${compact ? ' is-compact' : ''}${section === 'sports' ? ' is-sport' : ''}`}>
+    <article className={`media-card${compact ? ' is-compact' : ''}${section === 'sports' ? ' is-sport' : ''}${section === 'ott' && item.kind === 'live' ? ' is-channel' : ''}`}>
       <button className="media-poster" type="button" onClick={() => onPlay(item, section)} aria-label={`เล่น ${title}`}>
         {section === 'sports' && item.awayLogo ? <span className="team-match"><Poster item={item} /><b>VS</b><img src={item.awayLogo} alt="" loading="lazy" referrerPolicy="no-referrer" /></span> : <Poster item={item} />}
         <span className="poster-shade" />
@@ -295,7 +298,7 @@ function MediaCard({ item, section, compact = false, onPlay }) {
       <div className="media-body">
         <h3><button type="button" onClick={() => onPlay(item, section)}>{title}</button></h3>
         {section === 'sports' && <p className="event-time">{formatEventTime(item.time)}</p>}
-        <p>{section === 'movies' ? item.group || item.source : section === 'live' ? item.group : item.league || item.sport}</p>
+        <p>{section === 'movies' ? item.group || item.source : section !== 'sports' ? item.group : item.league || item.sport}</p>
       </div>
     </article>
   );
@@ -343,6 +346,7 @@ function HomePage({ catalog, loading, onPlay }) {
           <Link className="quick-category movie" to="/category/movies"><span>▶</span><div><strong>หนังทั้งหมด</strong><small>{catalog.total.toLocaleString('th-TH')} เรื่อง</small></div><b>›</b></Link>
           <Link className="quick-category live" to="/category/live"><span>●</span><div><strong>ทีวีสด</strong><small>{catalog.liveTotal.toLocaleString('th-TH')} ช่อง</small></div><b>›</b></Link>
           <Link className="quick-category sports" to="/category/sports"><span>◆</span><div><strong>กีฬาสด</strong><small>{catalog.sportsTotal.toLocaleString('th-TH')} รายการ</small></div><b>›</b></Link>
+          <Link className="quick-category ott" to="/category/ott"><span>▣</span><div><strong>OTT Playlist</strong><small>{catalog.ottTotal.toLocaleString('th-TH')} รายการ</small></div><b>›</b></Link>
           <div className="sidebar-note"><span>NO ADS</span><strong>ดูต่อเนื่อง ไม่มีอะไรมารบกวน</strong><p>เลือกเนื้อหาแล้วเริ่มรับชมได้ทันที</p></div>
         </aside>
         <div className="home-content">
@@ -356,6 +360,7 @@ function HomePage({ catalog, loading, onPlay }) {
           <div className="library-stat"><strong>{catalog.total.toLocaleString('th-TH')}</strong><span>หนัง</span></div>
           <div className="library-stat"><strong>{catalog.liveTotal.toLocaleString('th-TH')}</strong><span>ช่องทีวี</span></div>
           <div className="library-stat"><strong>{catalog.sportsTotal.toLocaleString('th-TH')}</strong><span>รายการกีฬา</span></div>
+          <div className="library-stat"><strong>{catalog.ottTotal.toLocaleString('th-TH')}</strong><span>รายการ OTT</span></div>
           <div className="last-update"><small>อัปเดตล่าสุด</small><strong>{formatSyncTime(catalog.generatedAt)}</strong><p>ระบบตรวจข้อมูลใหม่อัตโนมัติทุก 15 นาที</p></div>
         </aside>
       </div>
@@ -371,35 +376,37 @@ function useQueryState() {
   return useMemo(() => new URLSearchParams(window.location.search), [window.location.search]);
 }
 
-function CategoryPage({ catalog, section, loading, onPlay }) {
+function CategoryPage({ catalog, section, loading, onPlay, onVisibleItems }) {
   const params = useQueryState();
   const [query, setQuery] = useState(params.get('q') || '');
   const [filter, setFilter] = useState(params.get('filter') || '');
   const [page, setPage] = useState(Math.max(1, Number(params.get('page')) || 1));
   const meta = sections[section];
   const items = getSectionItems(catalog, section);
-  const filterOptions = useMemo(() => [...new Set(items.map((item) => section === 'movies' ? item.source : section === 'live' ? item.group : item.sport).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'th')), [items, section]);
+  const filterOptions = useMemo(() => [...new Set(items.map((item) => section === 'movies' ? item.source : section !== 'sports' ? item.group : item.sport).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'th')), [items, section]);
   const filtered = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase('th');
     return items.filter((item) => {
-      const itemFilter = section === 'movies' ? item.source : section === 'live' ? item.group : item.sport;
+      const itemFilter = section === 'movies' ? item.source : section !== 'sports' ? item.group : item.sport;
       return (!filter || itemFilter === filter) && (!normalized || `${displayTitle(item)} ${item.source || ''} ${item.group || ''} ${item.league || ''}`.toLocaleLowerCase('th').includes(normalized));
     });
   }, [items, query, filter, section]);
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
   const visible = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const visibleIds = visible.map((item) => item.id).join(',');
+  useEffect(() => { if (onVisibleItems && visible.length) onVisibleItems(visible); }, [visibleIds, onVisibleItems]);
 
   useEffect(() => {
+    if (loading) return;
     const next = new URLSearchParams();
     if (query) next.set('q', query);
     if (filter) next.set('filter', filter);
     if (safePage > 1) next.set('page', String(safePage));
     const suffix = next.toString() ? `?${next}` : '';
     window.history.replaceState({}, '', `/category/${section}${suffix}`);
-  }, [query, filter, safePage, section]);
+  }, [query, filter, safePage, section, loading]);
 
-  useEffect(() => { setPage(1); }, [query, filter]);
   useEffect(() => { setQuery(params.get('q') || ''); setFilter(params.get('filter') || ''); setPage(Math.max(1, Number(params.get('page')) || 1)); }, [section]);
 
   if (loading) return <PageLoading />;
@@ -410,9 +417,9 @@ function CategoryPage({ catalog, section, loading, onPlay }) {
       <div className="catalog-layout">
         <aside className="filter-panel">
           <PanelTitle icon="⌁" title="ค้นหาและกรอง" />
-          <label><span>ค้นหา</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`ค้นหา${meta.label}…`} /></label>
-          <label><span>{meta.filterLabel}</span><select value={filter} onChange={(event) => setFilter(event.target.value)}><option value="">ทั้งหมด</option>{filterOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
-          {(query || filter) && <button className="clear-filters" type="button" onClick={() => { setQuery(''); setFilter(''); }}>ล้างตัวกรอง</button>}
+          <label><span>ค้นหา</span><input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={`ค้นหา${meta.label}…`} /></label>
+          <label><span>{meta.filterLabel}</span><select value={filter} onChange={(event) => { setFilter(event.target.value); setPage(1); }}><option value="">ทั้งหมด</option>{filterOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
+          {(query || filter) && <button className="clear-filters" type="button" onClick={() => { setQuery(''); setFilter(''); setPage(1); }}>ล้างตัวกรอง</button>}
           <div className="filter-summary"><span>กำลังแสดง</span><strong>{visible.length.toLocaleString('th-TH')}</strong><small>จาก {filtered.length.toLocaleString('th-TH')} รายการ</small></div>
         </aside>
         <section className="catalog-content" aria-live="polite">
@@ -435,8 +442,8 @@ function DetailPage({ catalog, section, id, loading, onPlay }) {
   if (loading) return <PageLoading />;
   if (!item) return <NotFound />;
   const title = displayTitle(item);
-  const similarKey = section === 'movies' ? item.source : section === 'live' ? item.group : item.sport;
-  const related = items.filter((entry) => entry.id !== id && (section === 'movies' ? entry.source : section === 'live' ? entry.group : entry.sport) === similarKey).slice(0, 10);
+  const similarKey = section === 'movies' ? item.source : section !== 'sports' ? item.group : item.sport;
+  const related = items.filter((entry) => entry.id !== id && (section === 'movies' ? entry.source : section !== 'sports' ? entry.group : entry.sport) === similarKey).slice(0, 10);
   return (
     <main className="site-main inner-page">
       <Breadcrumbs items={[['หน้าแรก', '/'], [sections[section].label, `/category/${section}`], [title]]} />
@@ -469,13 +476,15 @@ function StreamPlayer({ item }) {
     let cancelReadiness = () => {};
     setStatus('กำลังเชื่อมต่อสตรีม…');
     async function setup() {
-      if (item.streamType === 'DASH') {
+      if (item.playbackError) throw new Error(item.playbackError);
+      if (item.streamType === 'DASH' || item.clearKeys) {
         const module = await import('shaka-player/dist/shaka-player.compiled.js');
         const shaka = module.default || module;
         shaka.polyfill.installAll();
         if (!shaka.Player.isBrowserSupported()) throw new Error('DASH_NOT_SUPPORTED');
         shakaPlayer = new shaka.Player();
         await shakaPlayer.attach(video);
+        if (item.clearKeys) shakaPlayer.configure({ drm: { clearKeys: item.clearKeys } });
         const network = shakaPlayer.getNetworkingEngine();
         network.registerRequestFilter((type, request) => {
           if (type !== shaka.net.NetworkingEngine.RequestType.MANIFEST) request.uris = request.uris.map((uri) => `${item.playUrl}&u=${encodeURIComponent(uri)}`);
@@ -494,7 +503,7 @@ function StreamPlayer({ item }) {
           };
           video.addEventListener('canplay', finish, { once: true });
           readyCheck = window.setInterval(() => { if (video.readyState >= 3) finish(); }, 150);
-          shakaPlayer.load(item.playUrl, null, 'application/dash+xml').then(finish, fail);
+          shakaPlayer.load(item.playUrl, null, item.streamType === 'DASH' ? 'application/dash+xml' : 'application/x-mpegurl').then(finish, fail);
         });
       } else {
         const { default: Hls } = await import('hls.js');
@@ -603,16 +612,33 @@ function Footer({ catalog }) {
 
 export default function App() {
   const route = useRoute();
-  const { catalog, loading, checking, error, syncNotice, manualState, manualUpdate } = useCatalog();
+  const { catalog: baseCatalog, loading, checking, error, syncNotice, manualState, manualUpdate } = useCatalog();
+  const ott = useOttCatalog(route.section === 'ott', baseCatalog.ottSummary);
+  const catalog = useMemo(() => ({ ...baseCatalog, ott: ott.items }), [baseCatalog, ott.items]);
+  const [playError, setPlayError] = useState('');
   const [activePlayer, setActivePlayer] = useState(null);
-  const openPlayer = (item, section) => {
-    setActivePlayer({ item, section });
+  const openPlayer = async (item, section) => {
+    setPlayError('');
     const root = document.documentElement;
     const requestFullscreen = root.requestFullscreen || root.webkitRequestFullscreen;
     if (!document.fullscreenElement && !document.webkitFullscreenElement && requestFullscreen) {
       Promise.resolve(requestFullscreen.call(root, { navigationUI: 'hide' })).catch(() => {});
     }
+    try {
+      const playable = section === 'ott' ? (await ott.loadItems([item]))[0] : item;
+      if (!playable?.playUrl) throw new Error('ยังโหลดข้อมูลรายการไม่ครบ กรุณาลองอีกครั้ง');
+      setActivePlayer({ item: playable, section });
+    } catch (reason) {
+      setPlayError(`เปิดรายการไม่สำเร็จ (${reason.message})`);
+      const exit = document.exitFullscreen || document.webkitExitFullscreen;
+      if ((document.fullscreenElement || document.webkitFullscreenElement) && exit) Promise.resolve(exit.call(document)).catch(() => {});
+    }
   };
+  const ottRouteItem = route.section === 'ott' && route.id ? ott.items.find((item) => item.id === route.id) : null;
+  useEffect(() => {
+    if (ottRouteItem && !ottRouteItem.playUrl) ott.loadVisible([ottRouteItem]);
+  }, [ottRouteItem?.id, ottRouteItem?.playUrl, ott.loadVisible]);
+  const pageLoading = loading || (route.section === 'ott' && (ott.loading || Boolean(ottRouteItem && !ottRouteItem.playUrl && !ott.error)));
   const closePlayer = () => {
     setActivePlayer(null);
     const exitFullscreen = document.exitFullscreen || document.webkitExitFullscreen;
@@ -641,15 +667,15 @@ export default function App() {
 
   let page;
   if (route.name === 'home') page = <HomePage catalog={catalog} loading={loading} onPlay={openPlayer} />;
-  else if (route.name === 'category') page = <CategoryPage catalog={catalog} section={route.section} loading={loading} onPlay={openPlayer} />;
-  else if (route.name === 'details') page = <DetailPage catalog={catalog} section={route.section} id={route.id} loading={loading} onPlay={openPlayer} />;
-  else if (route.name === 'watch') page = <WatchPage catalog={catalog} section={route.section} id={route.id} loading={loading} />;
+  else if (route.name === 'category') page = <CategoryPage key={route.section} catalog={catalog} section={route.section} loading={pageLoading} onPlay={openPlayer} onVisibleItems={route.section === 'ott' ? ott.loadVisible : undefined} />;
+  else if (route.name === 'details') page = <DetailPage catalog={catalog} section={route.section} id={route.id} loading={pageLoading} onPlay={openPlayer} />;
+  else if (route.name === 'watch') page = <WatchPage catalog={catalog} section={route.section} id={route.id} loading={pageLoading} />;
   else page = <NotFound />;
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">ข้ามไปยังเนื้อหา</a>
       <Header catalog={catalog} route={route} checking={checking} manualState={manualState} onManualUpdate={manualUpdate} onPlay={openPlayer} />
-      <div id="main-content">{syncNotice && <div className="global-notice" role="status">✓ {syncNotice}</div>}{error && <div className="global-error" role="alert">{error}</div>}{page}</div>
+      <div id="main-content">{syncNotice && <div className="global-notice" role="status">✓ {syncNotice}</div>}{(error || ott.error || playError) && <div className="global-error" role="alert">{error || ott.error || playError}</div>}{catalog.ottSummary?.degraded && route.section === 'ott' && <div className="global-notice" role="status">ต้นทาง OTT อัปเดตไม่สำเร็จ กำลังแสดงคลังล่าสุดที่บันทึกไว้</div>}{page}</div>
       <Footer catalog={catalog} />
       {activePlayer && <PlayerOverlay selection={activePlayer} onClose={closePlayer} />}
     </div>
