@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { detectStreamType, highestHlsConfig, highestQualityIndex, highestShakaConfig, lockHlsToHighest, lockShakaToHighest, playable, playbackErrorMessage, proxyResourceUrl, sourceUrl } from './playback';
+import { isVideoFullscreen, startVideoPresentation } from './player-presentation';
 
-export default function StreamPlayer({ item }) {
-  const videoRef = useRef(null);
+export default function StreamPlayer({ item, mediaRef, autoFullscreen = false }) {
+  const internalVideoRef = useRef(null);
+  const videoRef = mediaRef || internalVideoRef;
   const cleanupDone = useRef(Promise.resolve());
   const [status, setStatus] = useState('กำลังเตรียมเครื่องเล่น…');
   const [resolution, setResolution] = useState('');
+  const [actionRequired, setActionRequired] = useState('');
+  const applyPresentation = ({ playing, fullscreenAccepted }) => {
+    setActionRequired(!playing ? 'play' : !fullscreenAccepted ? 'fullscreen' : '');
+    if (!playing) setStatus('แตะปุ่มเล่นเพื่อเริ่มรับชม');
+  };
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !item) return undefined;
@@ -17,10 +24,17 @@ export default function StreamPlayer({ item }) {
     let lastHttpStatus;
     setStatus('กำลังโหลดคุณภาพสูงสุดจากต้นทาง…');
     setResolution('');
+    setActionRequired('');
     const updateResolution = () => {
       if (!cancelled && video.videoWidth) setResolution(video.videoWidth + '×' + video.videoHeight);
     };
-    const playing = () => { updateResolution(); if (!cancelled) setStatus('กำลังเล่น'); };
+    const playing = () => {
+      updateResolution();
+      if (!cancelled) {
+        setStatus('กำลังเล่น');
+        setActionRequired(autoFullscreen && !isVideoFullscreen(video) ? 'fullscreen' : '');
+      }
+    };
     const waiting = () => { if (!cancelled) setStatus('กำลังบัฟเฟอร์คุณภาพสูงสุด…'); };
     video.addEventListener('resize', updateResolution);
     video.addEventListener('loadedmetadata', updateResolution);
@@ -124,8 +138,8 @@ export default function StreamPlayer({ item }) {
       await Promise.race([Promise.all([ready, load()]), fatal]);
       if (!cancelled) {
         updateResolution();
-        setStatus('พร้อมเล่น · คุณภาพสูงสุด');
-        video.play().catch(() => { if (!cancelled) setStatus('กดปุ่มเล่นเพื่อเริ่มรับชม'); });
+        setStatus(video.paused ? 'พร้อมเล่น · คุณภาพสูงสุด' : 'กำลังเล่น');
+        startVideoPresentation(video, autoFullscreen).then((result) => { if (!cancelled) applyPresentation(result); });
       }
     }
     setup().catch((error) => {
@@ -150,6 +164,9 @@ export default function StreamPlayer({ item }) {
       video.removeAttribute('src');
       video.load();
     };
-  }, [item]);
-  return <><div className="video-frame"><video ref={videoRef} controls playsInline preload="auto" poster={item.logo || undefined} /></div><div className="player-status"><span className="status-dot" /><span>{status}</span><b className="video-quality" aria-label="คุณภาพวิดีโอ" aria-live="polite">{resolution || 'ต้นฉบับสูงสุด'}</b></div></>;
+  }, [item, autoFullscreen]);
+  return <><div className="video-frame"><video ref={videoRef} controls autoPlay playsInline preload="auto" poster={item?.logo || undefined} />{actionRequired && <button className="player-start primary-button" type="button" onClick={() => {
+    const video = videoRef.current;
+    startVideoPresentation(video, autoFullscreen).then((result) => { if (video.isConnected && videoRef.current === video) applyPresentation(result); });
+  }}>{actionRequired === 'fullscreen' ? '⛶ เต็มจอ' : autoFullscreen ? '▶ เล่นเต็มจอ' : '▶ เล่นวิดีโอ'}</button>}</div><div className="player-status"><span className="status-dot" /><span>{status}</span><b className="video-quality" aria-label="คุณภาพวิดีโอ" aria-live="polite">{resolution || 'ต้นฉบับสูงสุด'}</b></div></>;
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useOttCatalog } from './useOttCatalog';
 import StreamPlayer from './StreamPlayer';
+import { isVideoFullscreen, leaveVideoFullscreen, startVideoPresentation } from './player-presentation';
 
 const PAGE_SIZE = 30;
 const POLL_INTERVAL_MS = 15 * 60 * 1000;
@@ -439,7 +440,7 @@ function WatchPage({ catalog, section, id, loading }) {
   );
 }
 
-function PlayerOverlay({ selection, onClose }) {
+function PlayerOverlay({ selection, onClose, mediaRef }) {
   const { item, section } = selection;
   const title = displayTitle(item);
   return (
@@ -448,7 +449,7 @@ function PlayerOverlay({ selection, onClose }) {
         <div><span className="eyebrow">NOW PLAYING · {sections[section].label}</span><h2>{title}</h2></div>
         <button type="button" onClick={onClose} aria-label="ปิดเครื่องเล่น" autoFocus>×</button>
       </header>
-      <div className="fullscreen-player-stage"><StreamPlayer key={item.id} item={item} /></div>
+      <div className="fullscreen-player-stage"><StreamPlayer key={item.id} item={item.playUrl ? item : null} mediaRef={mediaRef} autoFullscreen /></div>
       <p className="fullscreen-player-help">กด Esc หรือปุ่ม × เพื่อกลับไปยังรายการเดิม · ไม่มีโฆษณาคั่น</p>
     </section>
   );
@@ -484,21 +485,25 @@ export default function App() {
   const catalog = useMemo(() => ({ ...baseCatalog, ott: ott.items }), [baseCatalog, ott.items]);
   const [playError, setPlayError] = useState('');
   const [activePlayer, setActivePlayer] = useState(null);
+  const overlayVideoRef = useRef(null);
+  const playRequestRef = useRef(0);
   const openPlayer = async (item, section) => {
+    const requestId = ++playRequestRef.current;
     setPlayError('');
-    const root = document.documentElement;
-    const requestFullscreen = root.requestFullscreen || root.webkitRequestFullscreen;
-    if (!document.fullscreenElement && !document.webkitFullscreenElement && requestFullscreen) {
-      Promise.resolve(requestFullscreen.call(root, { navigationUI: 'hide' })).catch(() => {});
-    }
+    // Mount the video during the user's tap, including while OTT details load.
+    flushSync(() => setActivePlayer({ item, section }));
+    const video = overlayVideoRef.current;
+    startVideoPresentation(video).then(() => { if (overlayVideoRef.current !== video) leaveVideoFullscreen(video); });
     try {
       const playable = section === 'ott' ? (await ott.loadItems([item]))[0] : item;
+      if (requestId !== playRequestRef.current) return;
       if (!playable?.playUrl) throw new Error('ยังโหลดข้อมูลรายการไม่ครบ กรุณาลองอีกครั้ง');
       setActivePlayer({ item: playable, section });
     } catch (reason) {
+      if (requestId !== playRequestRef.current) return;
       setPlayError(`เปิดรายการไม่สำเร็จ (${reason.message})`);
-      const exit = document.exitFullscreen || document.webkitExitFullscreen;
-      if ((document.fullscreenElement || document.webkitFullscreenElement) && exit) Promise.resolve(exit.call(document)).catch(() => {});
+      leaveVideoFullscreen(video);
+      setActivePlayer(null);
     }
   };
   const ottRouteItem = route.section === 'ott' && route.id ? ott.items.find((item) => item.id === route.id) : null;
@@ -507,30 +512,35 @@ export default function App() {
   }, [ottRouteItem?.id, ottRouteItem?.playUrl, ott.loadVisible]);
   const pageLoading = loading || (route.section === 'ott' && (ott.loading || Boolean(ottRouteItem && !ottRouteItem.playUrl && !ott.error)));
   const closePlayer = () => {
+    ++playRequestRef.current;
+    leaveVideoFullscreen(overlayVideoRef.current);
     setActivePlayer(null);
-    const exitFullscreen = document.exitFullscreen || document.webkitExitFullscreen;
-    if ((document.fullscreenElement || document.webkitFullscreenElement) && exitFullscreen) {
-      Promise.resolve(exitFullscreen.call(document)).catch(() => {});
-    }
   };
 
   useEffect(() => {
     if (!activePlayer) return undefined;
     document.body.classList.add('player-open');
+    const video = overlayVideoRef.current;
+    let enteredFullscreen = isVideoFullscreen(video);
     const handleKeyDown = (event) => { if (event.key === 'Escape') closePlayer(); };
     const handleFullscreenChange = () => {
-      if (!document.fullscreenElement && !document.webkitFullscreenElement) setActivePlayer(null);
+      if (isVideoFullscreen(video)) enteredFullscreen = true;
+      else if (enteredFullscreen) closePlayer();
     };
+    video?.addEventListener('webkitbeginfullscreen', handleFullscreenChange);
+    video?.addEventListener('webkitendfullscreen', closePlayer);
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
     return () => {
       document.body.classList.remove('player-open');
+      video?.removeEventListener('webkitbeginfullscreen', handleFullscreenChange);
+      video?.removeEventListener('webkitendfullscreen', closePlayer);
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
     };
-  }, [activePlayer]);
+  }, [activePlayer?.item.id]);
 
   let page;
   if (route.name === 'home') page = <HomePage catalog={catalog} loading={loading} onPlay={openPlayer} />;
@@ -544,7 +554,7 @@ export default function App() {
       <Header catalog={catalog} route={route} checking={checking} manualState={manualState} onManualUpdate={manualUpdate} onPlay={openPlayer} />
       <div id="main-content">{syncNotice && <div className="global-notice" role="status">✓ {syncNotice}</div>}{(error || ott.error || playError) && <div className="global-error" role="alert">{error || ott.error || playError}</div>}{catalog.ottSummary?.degraded && route.section === 'ott' && <div className="global-notice" role="status">ต้นทาง OTT อัปเดตไม่สำเร็จ กำลังแสดงคลังล่าสุดที่บันทึกไว้</div>}{page}</div>
       <Footer catalog={catalog} />
-      {activePlayer && <PlayerOverlay selection={activePlayer} onClose={closePlayer} />}
+      {activePlayer && <PlayerOverlay selection={activePlayer} onClose={closePlayer} mediaRef={overlayVideoRef} />}
     </div>
   );
 }
