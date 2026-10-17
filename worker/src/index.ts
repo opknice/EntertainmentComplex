@@ -1,3 +1,5 @@
+import { dashResourceOrigins } from './dash.ts';
+
 const MAX_MANIFEST_BYTES = 5 * 1024 * 1024;
 const textEncoder = new TextEncoder();
 
@@ -17,7 +19,7 @@ function corsHeaders(request: Request, env: Env): Headers {
   const headers = new Headers({
     'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
     'Access-Control-Allow-Headers': 'Range, Content-Type',
-    'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges, Content-Type, X-Media-Base',
+    'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges, Content-Type, X-Media-Base, X-Media-Context',
     'Vary': 'Origin',
   });
   if (allowed.includes(origin) || isLocalDevelopmentOrigin(origin)) headers.set('Access-Control-Allow-Origin', origin);
@@ -206,6 +208,38 @@ async function readBoundedText(response: Response): Promise<string> {
   return new TextDecoder().decode(joined);
 }
 
+async function inspectBody(response: Response): Promise<{ prefix: string; body: ReadableStream<Uint8Array> | null }> {
+  if (!response.body) return { prefix: '', body: null };
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  let done = false;
+  while (length < 1024 && !done) {
+    const next = await reader.read();
+    done = next.done;
+    if (next.value) { chunks.push(next.value); length += next.value.byteLength; }
+  }
+  const prefixBytes = new Uint8Array(Math.min(length, 1024));
+  let offset = 0;
+  for (const chunk of chunks) {
+    const count = Math.min(chunk.length, prefixBytes.length - offset);
+    if (count > 0) prefixBytes.set(chunk.subarray(0, count), offset);
+    offset += count;
+  }
+  return {
+    prefix: new TextDecoder().decode(prefixBytes).replace(/^\uFEFF/, '').trimStart(),
+    body: new ReadableStream<Uint8Array>({
+      start(controller) { for (const chunk of chunks) controller.enqueue(chunk); if (done) controller.close(); },
+      async pull(controller) {
+        const next = await reader.read();
+        if (next.done) controller.close();
+        else controller.enqueue(next.value);
+      },
+      cancel(reason) { return reader.cancel(reason); },
+    }),
+  };
+}
+
 function copyResponseHeaders(upstream: Response, request: Request, env: Env): Headers {
   const headers = corsHeaders(request, env);
   for (const name of ['Content-Type', 'Content-Length', 'Content-Range', 'Accept-Ranges', 'Cache-Control', 'ETag', 'Last-Modified']) {
@@ -250,16 +284,27 @@ async function handleMedia(request: Request, env: Env, requestUrl: URL): Promise
   const headers = copyResponseHeaders(upstream, request, env);
 
   if (request.method === 'HEAD' || (!isManifest && !isDashManifest && !mayContainManifest) || !upstream.ok) return new Response(upstream.body, { status: upstream.status, headers });
-  const manifest = await readBoundedText(upstream);
-  if (!isManifest && !isDashManifest && !manifest.replace(/^\uFEFF/, '').trimStart().startsWith('#EXTM3U')) {
-    headers.delete('Content-Length');
-    return new Response(manifest, { status: upstream.status, headers });
+  const inspected = await inspectBody(upstream);
+  const hlsBody = inspected.prefix.startsWith('#EXTM3U');
+  const dashBody = isDashManifest && inspected.prefix.startsWith('<');
+  if (!hlsBody && !dashBody) {
+    // Some providers label TS/AES segments as mpegurl, even with .html paths.
+    // Preserve their bytes: decoding/re-signing binary content corrupts playback.
+    if (contentType.includes('mpegurl')) headers.set('Content-Type', 'application/octet-stream');
+    return new Response(inspected.body, { status: upstream.status, headers });
   }
+  const manifest = await readBoundedText(new Response(inspected.body, { headers: upstream.headers }));
   const manifestUrl = new URL(upstream.url || target.href);
-  const rewritten = isDashManifest ? manifest : await rewriteManifest(manifest, manifestUrl, payload, env, requestUrl);
-  headers.set('Content-Type', isDashManifest ? 'application/dash+xml; charset=utf-8' : 'application/vnd.apple.mpegurl; charset=utf-8');
+  if (dashBody) {
+    const origins = dashResourceOrigins(manifest, manifestUrl).map((origin) => validatedTarget(`${origin}/`).origin);
+    const resourcePayload = { ...payload, o: [...new Set([...(payload.o || []), ...origins])] };
+    if (resourcePayload.o.length > 8) throw new Error('too many DASH resource origins');
+    headers.set('X-Media-Context', await signUrl(signedTarget, resourcePayload, env, requestUrl));
+  }
+  const rewritten = dashBody ? manifest : await rewriteManifest(manifest, manifestUrl, payload, env, requestUrl);
+  headers.set('Content-Type', dashBody ? 'application/dash+xml; charset=utf-8' : 'application/vnd.apple.mpegurl; charset=utf-8');
   headers.delete('Content-Length');
-  headers.set('Cache-Control', 'private, max-age=30');
+  headers.set('Cache-Control', !dashBody && /#EXT-X-ENDLIST/.test(manifest) ? 'private, max-age=30' : 'no-store');
   headers.set('X-Media-Base', manifestUrl.href);
   return new Response(rewritten, { status: upstream.status, headers });
 }

@@ -44,6 +44,20 @@ https://media.example/stream`);
   assert.deepEqual(item.clearKeys, { [keyId]: key });
 });
 
+test('keeps multiple comma-separated ClearKey pairs supplied by the playlist', () => {
+  const firstId = '00112233445566778899aabbccddeeff';
+  const firstKey = 'ffeeddccbbaa99887766554433221100';
+  const secondId = '102132435465768798a9bacbdcedfe0f';
+  const secondKey = '0ffedccbaa9988776655443322110010';
+  const { items: [item] } = parseOttPlaylist(`#EXTM3U
+#EXTINF:-1 group-title="Sport MPD",Multi-key channel
+#KODIPROP:inputstream.adaptive.license_type=org.w3.clearkey
+#KODIPROP:inputstream.adaptive.license_key=${firstId}:${firstKey},${secondId}:${secondKey}
+https://media.example/manifest.mpd`);
+  assert.deepEqual(item.clearKeys, { [firstId]: firstKey, [secondId]: secondKey });
+  assert.equal(item.playbackError, undefined);
+});
+
 test('rejects approval/error responses so refresh cannot replace a valid catalog with status entries', () => {
   assert.throws(() => parseOttPlaylist('Forbidden'), /not an M3U/);
   assert.throws(() => parseOttPlaylist('#EXTM3U\n#EXTINF:-1,Unknown ID\nhttp://error.com'), /no playable entries/);

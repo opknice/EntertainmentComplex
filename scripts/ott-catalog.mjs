@@ -10,9 +10,12 @@ function attributes(text) {
 
 function clearKeys(value) {
   const keys = {};
-  if (/^[a-f0-9]{32}:[a-f0-9]{32}$/i.test(value)) {
-    const [id, key] = value.split(':');
-    keys[id] = key;
+  const pairs = value.split(',').map((entry) => entry.trim()).filter(Boolean);
+  if (pairs.length && pairs.every((entry) => /^[a-f0-9]{32}:[a-f0-9]{32}$/i.test(entry))) {
+    for (const pair of pairs) {
+      const [id, key] = pair.split(':');
+      keys[id] = key;
+    }
   } else {
     try {
       const parsed = JSON.parse(value);

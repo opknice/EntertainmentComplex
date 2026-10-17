@@ -12,11 +12,13 @@
     "start": "npm run preview",
     "sync:catalog": "node scripts/sync-catalog.mjs",
     "sync:ott": "node scripts/sync-catalog.mjs --ott-only",
+    "audit:ott": "node scripts/audit-ott.mjs",
     "worker:types": "wrangler types worker/worker-configuration.d.ts",
     "worker:check": "npm run worker:types && tsc --noEmit && wrangler deploy --dry-run"
   },
   "dependencies": {
     "csv-parse": "^7.0.3",
+    "fast-xml-parser": "^5.11.2",
     "hls.js": "^1.6.13",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { detectStreamType, proxyResourceUrl, sourceUrl } from './playback.js';
+import { detectStreamType, playbackErrorMessage, proxyResourceUrl, sourceUrl } from './playback.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -41,4 +41,21 @@ test('resolves relative manifests against their upstream URL without double prox
 test('recovers the original source URL from a signed proxy URL', () => {
   const payload = Buffer.from(JSON.stringify({ u: 'http://origin.example/live' })).toString('base64url');
   assert.equal(sourceUrl({ playUrl: `https://proxy.example/v1/media?p=${payload}&s=sig` }), 'http://origin.example/live');
+});
+
+test('explains expired, denied, origin, DRM and codec failures accurately', () => {
+  assert.match(playbackErrorMessage(new Error('HTTP 404')), /ยังยืนยันไม่ได้ว่าสัญญาณหมดอายุ/);
+  assert.match(playbackErrorMessage(new Error('HTTP 410')), /อัปเดตคลัง/);
+  assert.match(playbackErrorMessage(new Error('ต้นทางตอบ HTTP 403')), /ปฏิเสธสิทธิ์/);
+  assert.match(playbackErrorMessage(new Error('HTTP 521')), /ต้นทางขัดข้อง/);
+  assert.match(playbackErrorMessage(new Error('Shaka Error 6001')), /DRM/);
+  assert.match(playbackErrorMessage(new Error('Shaka Error 6007')), /ใบอนุญาต DRM/);
+  assert.match(playbackErrorMessage(new Error('video_error_4')), /ไม่รองรับ/);
+});
+
+test('retains HTTP evidence from Shaka and distinguishes a web link expiry from an upstream outage', () => {
+  assert.match(playbackErrorMessage({ code: 1001, data: ['https://proxy.example', 404, 'Not found'] }), /HTTP 404/);
+  assert.match(playbackErrorMessage({ code: 1001, data: ['https://proxy.example', 410, '{"error":"link expired"}'] }), /ลิงก์รับชมของเว็บหมดอายุ/);
+  assert.match(playbackErrorMessage({ code: 1001, data: ['https://proxy.example', 403, '{"error":"target origin mismatch"}'] }), /CDN/);
+  assert.match(playbackErrorMessage({ code: 1001, data: ['https://proxy.example', 502, '{"error":"proxy request failed"}'] }), /ระบบส่งต่อสตรีม/);
 });

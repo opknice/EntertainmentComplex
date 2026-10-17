@@ -6,4 +6,5 @@ dist/
 .dev.vars
 .wrangler/
 worker-dist*/
+reports/ott-audit/
 npm-debug.log*

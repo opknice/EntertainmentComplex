@@ -15,6 +15,30 @@ export function proxyResourceUrl(playUrl, uri, base) {
   return proxy.href;
 }
 
+export function playbackErrorMessage(error) {
+  const message = error?.message || String(error || '');
+  const code = error?.code || Number(message.match(/Shaka(?: Error)? (\d+)/i)?.[1]);
+  const networkError = code === 1001 ? error : Array.isArray(error?.data) ? error.data.find((entry) => entry?.code === 1001) : null;
+  const status = Number(networkError?.data?.[1] || message.match(/HTTP[_ ]?([1-5]\d\d)/i)?.[1]);
+  if (code === 6007 || /LICENSE_REQUEST_FAILED/i.test(message)) return 'ต้นทางปฏิเสธหรือไม่ตอบรับคำขอใบอนุญาต DRM';
+  try {
+    const reason = JSON.parse(networkError?.data?.[2] || '{}').error;
+    if (reason === 'link expired') return 'ลิงก์รับชมของเว็บหมดอายุ กรุณาอัปเดตคลังแล้วเปิดใหม่';
+    if (reason === 'target origin mismatch') return 'ระบบส่งต่อสตรีมยังไม่รองรับ CDN ของช่องนี้ กรุณาอัปเดตคลังแล้วลองใหม่';
+    if (reason === 'proxy request failed') return 'ระบบส่งต่อสตรีมเชื่อมต่อหรืออ่านข้อมูลต้นทางไม่สำเร็จ';
+  } catch { /* Non-JSON upstream errors retain their HTTP status below. */ }
+  if (status === 404) return 'ต้นทางไม่พบไฟล์สตรีม (HTTP 404) ยังยืนยันไม่ได้ว่าสัญญาณหมดอายุ';
+  if (status === 410) return 'ลิงก์สตรีมถูกยกเลิกหรือหมดอายุ (HTTP 410) ลองอัปเดตคลังแล้วเปิดใหม่';
+  if ([401, 403].includes(status)) return `ต้นทางปฏิเสธสิทธิ์รับชม (HTTP ${status})`;
+  if (status === 429) return 'ต้นทางจำกัดจำนวนการเชื่อมต่อ (HTTP 429) กรุณารอสักครู่แล้วลองใหม่';
+  if (status >= 500) return `เซิร์ฟเวอร์ต้นทางขัดข้อง (HTTP ${status})`;
+  if (code === 6001 || /DRM_NO_RECOGNIZED_KEY_SYSTEMS/i.test(message)) return 'ช่องนี้ใช้ระบบ DRM ที่เบราว์เซอร์หรือข้อมูลใบอนุญาตปัจจุบันยังไม่รองรับ';
+  if (/video_error_4|MEDIA_ERR_SRC_NOT_SUPPORTED/i.test(message)) return 'รูปแบบสตรีมนี้ไม่รองรับการเล่นในเว็บเบราว์เซอร์';
+  if (/stream_timeout|playback_timeout/i.test(message)) return 'ต้นทางตอบช้าหรือไม่มีข้อมูลวิดีโอภายในเวลาที่กำหนด';
+  if (message === 'DASH_NOT_SUPPORTED') return 'เบราว์เซอร์นี้ไม่รองรับ DASH';
+  return `โหลดสตรีมไม่สำเร็จ${message ? ` (${message})` : ''}`;
+}
+
 export async function detectStreamType(item, signal) {
   if (item.streamType !== 'AUTO') return item.streamType;
   const classifyContentType = (type = '') => {
