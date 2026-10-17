@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useOttCatalog } from './useOttCatalog';
-import { detectStreamType, playable, playbackErrorMessage, proxyResourceUrl, sourceUrl } from './playback';
+import StreamPlayer from './StreamPlayer';
 
 const PAGE_SIZE = 30;
 const POLL_INTERVAL_MS = 15 * 60 * 1000;
@@ -465,111 +465,6 @@ function MetaRow({ label, value }) {
   return <div><dt>{label}</dt><dd>{value}</dd></div>;
 }
 
-function StreamPlayer({ item }) {
-  const videoRef = useRef(null);
-  const [status, setStatus] = useState('กำลังเตรียมเครื่องเล่น…');
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !item) return undefined;
-    let hls;
-    let shakaPlayer;
-    let cancelled = false;
-    let cancelReadiness = () => {};
-    const controller = new AbortController();
-    setStatus('กำลังเชื่อมต่อสตรีม…');
-    async function setup() {
-      if (item.playbackError) throw new Error(item.playbackError);
-      const streamType = await detectStreamType(item, controller.signal);
-      if (cancelled) return;
-      if (streamType === 'DASH' || item.clearKeys) {
-        const module = await import('shaka-player/dist/shaka-player.compiled.js');
-        if (cancelled) return;
-        const shaka = module.default || module;
-        shaka.polyfill.installAll();
-        if (!shaka.Player.isBrowserSupported()) throw new Error('DASH_NOT_SUPPORTED');
-        shakaPlayer = new shaka.Player();
-        await shakaPlayer.attach(video);
-        if (item.clearKeys) shakaPlayer.configure({ drm: { clearKeys: item.clearKeys } });
-        const network = shakaPlayer.getNetworkingEngine();
-        let manifestBase = sourceUrl(item);
-        let resourceContext = item.playUrl;
-        network.registerRequestFilter((type, request) => {
-          request.uris = request.uris.map((uri) => /^https?:/i.test(uri) ? proxyResourceUrl(resourceContext, uri, manifestBase) : uri);
-        });
-        network.registerResponseFilter((type, response) => {
-          if (type === shaka.net.NetworkingEngine.RequestType.MANIFEST) {
-            manifestBase = response.headers['x-media-base'] || manifestBase;
-            resourceContext = response.headers['x-media-context'] || resourceContext;
-            response.uri = manifestBase;
-          }
-        });
-        shakaPlayer.addEventListener('error', (event) => { if (!cancelled) setStatus(playbackErrorMessage(event.detail)); });
-        await Promise.all([
-          playable(video, (cancel) => { cancelReadiness = cancel; }),
-          shakaPlayer.load(item.playUrl, null, streamType === 'DASH' ? 'application/dash+xml' : 'application/x-mpegurl'),
-        ]);
-      } else {
-        const { default: Hls } = await import('hls.js');
-        if (cancelled) return;
-        if (Hls.isSupported() && streamType === 'HLS') {
-          hls = new Hls({ enableWorker: true, lowLatencyMode: true });
-          hls.loadSource(item.playUrl);
-          hls.attachMedia(video);
-          await new Promise((resolve, reject) => {
-            let readyCheck;
-            let readyTimeout;
-            let settled = false;
-            let lastHttpStatus;
-            const cleanup = () => {
-              video.removeEventListener('canplay', finish);
-              window.clearInterval(readyCheck);
-              window.clearTimeout(readyTimeout);
-            };
-            const finish = () => {
-              if (settled) return;
-              settled = true;
-              cleanup();
-              resolve();
-            };
-            const fail = (detail) => {
-              if (settled) return;
-              settled = true;
-              cleanup();
-              reject(new Error(detail || 'stream_load_failed'));
-            };
-            cancelReadiness = cleanup;
-            video.addEventListener('canplay', finish, { once: true });
-            readyCheck = window.setInterval(() => { if (video.readyState >= 3) finish(); }, 150);
-            readyTimeout = window.setTimeout(() => fail(lastHttpStatus ? `HTTP ${lastHttpStatus}` : 'stream_timeout'), 20_000);
-            hls.on(Hls.Events.ERROR, (_event, data) => {
-              const status = data.response?.code;
-              if (status) lastHttpStatus = status;
-              if (!data.fatal) return;
-              fail(status ? `HTTP ${status}` : data.details || data.type);
-            });
-          });
-        } else {
-          const readiness = playable(video, (cancel) => { cancelReadiness = cancel; });
-          video.src = item.playUrl;
-          video.load();
-          await readiness;
-        }
-      }
-      if (!cancelled) {
-        setStatus('พร้อมเล่น');
-        video.play().catch(() => setStatus('กดปุ่มเล่นเพื่อเริ่มรับชม'));
-      }
-    }
-    setup().catch((playerError) => {
-      cancelReadiness();
-      if (cancelled) return;
-      console.error('player setup failed', playerError);
-      setStatus(playbackErrorMessage(playerError));
-    });
-    return () => { cancelled = true; controller.abort(); cancelReadiness(); hls?.destroy(); shakaPlayer?.destroy(); video.removeAttribute('src'); video.load(); };
-  }, [item]);
-  return <><div className="video-frame"><video ref={videoRef} controls playsInline poster={item.logo || undefined} /></div><div className="player-status"><span className="status-dot" /><span>{status}</span><b>SECURE STREAM</b></div></>;
-}
 
 function WatchPage({ catalog, section, id, loading }) {
   const item = getSectionItems(catalog, section).find((entry) => entry.id === id);

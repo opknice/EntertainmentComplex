@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { detectStreamType, playbackErrorMessage, proxyResourceUrl, sourceUrl } from './playback.js';
+import { detectStreamType, highestQualityIndex, lockHlsToHighest, lockShakaToHighest, playbackErrorMessage, proxyResourceUrl, sourceUrl } from './playback.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -28,7 +28,7 @@ test('uses the GET content type for extensionless media', async () => {
         headers: { 'content-type': 'video/x-matroska' },
       });
 
-  assert.equal(await detectStreamType({ streamType: 'AUTO', playUrl: 'https://proxy.example/media' }), 'วิดีโอ');
+  assert.equal(await detectStreamType({ streamType: 'AUTO', playUrl: 'https://proxy.example/media' }), 'MKV');
 });
 
 test('resolves relative manifests against their upstream URL without double proxying', () => {
@@ -58,4 +58,53 @@ test('retains HTTP evidence from Shaka and distinguishes a web link expiry from 
   assert.match(playbackErrorMessage({ code: 1001, data: ['https://proxy.example', 410, '{"error":"link expired"}'] }), /ลิงก์รับชมของเว็บหมดอายุ/);
   assert.match(playbackErrorMessage({ code: 1001, data: ['https://proxy.example', 403, '{"error":"target origin mismatch"}'] }), /CDN/);
   assert.match(playbackErrorMessage({ code: 1001, data: ['https://proxy.example', 502, '{"error":"proxy request failed"}'] }), /ระบบส่งต่อสตรีม/);
+});
+
+test('highest quality uses resolution before frame rate and bitrate, without relying on playlist order', () => {
+  const levels = [
+    { width: 1920, height: 1080, frameRate: 60, bitrate: 15e6 },
+    { width: 3840, height: 2160, frameRate: 30, bitrate: 12e6 },
+    { width: 1280, height: 720, frameRate: 60, bitrate: 25e6 },
+    { width: 3840, height: 2160, frameRate: 60, bitrate: 10e6 },
+    { width: 3840, height: 2160, frameRate: 60, bitrate: 14e6 },
+  ];
+  assert.equal(highestQualityIndex(levels), 4);
+  assert.equal(highestQualityIndex([]), -1);
+  assert.equal(highestQualityIndex([{ bitrate: 4e6 }, { bitrate: 8e6 }]), 1);
+  assert.equal(highestQualityIndex([{ height: 1080, bitrate: 4e6 }, { width: 1280, height: 720, bitrate: 8e6 }]), 0);
+});
+
+test('HLS is locked manually and DASH preserves the active language when video quality is equal', () => {
+  const hls = { levels: [{ width: 1920, height: 1080 }, { width: 640, height: 360 }] };
+  lockHlsToHighest(hls);
+  assert.equal(hls.startLevel, 0);
+  assert.equal(hls.loadLevel, 0);
+  let selected;
+  const player = {
+    getVariantTracks: () => [
+      { id: 1, width: 640, height: 360, language: 'th', active: true },
+      { id: 2, width: 1920, height: 1080, videoBandwidth: 5e6, bandwidth: 6e6, language: 'en' },
+      { id: 3, width: 1920, height: 1080, videoBandwidth: 5e6, bandwidth: 5.5e6, language: 'th' },
+    ],
+    selectVariantTrack: (track, clear) => { selected = { id: track.id, clear }; },
+  };
+  lockShakaToHighest(player);
+  assert.deepEqual(selected, { id: 3, clear: true });
+});
+
+test('recognizes raw transport streams, MKV and FLV instead of passing them to an incompatible native player', async () => {
+  for (const [mime, expected] of [['video/mp2t', 'MPEG-TS'], ['video/x-matroska', 'MKV'], ['video/x-flv', 'FLV']]) {
+    globalThis.fetch = async () => new Response(null, { headers: { 'content-type': mime } });
+    assert.equal(await detectStreamType({ streamType: 'AUTO', playUrl: 'https://proxy.example/media' }), expected);
+  }
+  assert.equal(await detectStreamType({ streamType: 'วิดีโอ', directUrl: 'https://source.example/film.mkv', playUrl: 'https://proxy.example/media' }), 'MKV');
+});
+
+test('sniffs fragmented transport bytes when an extensionless origin incorrectly reports MP4', async () => {
+  const bytes = new Uint8Array(564);
+  bytes[0] = bytes[188] = bytes[376] = 0x47;
+  globalThis.fetch = async (_url, options) => new Response(options.method === 'HEAD' ? null : new ReadableStream({
+    start(controller) { controller.enqueue(bytes.slice(0, 2)); controller.enqueue(bytes.slice(2)); controller.close(); },
+  }), { headers: { 'content-type': 'video/mp4' } });
+  assert.equal(await detectStreamType({ streamType: 'AUTO', playUrl: 'https://proxy.example/live' }), 'MPEG-TS');
 });

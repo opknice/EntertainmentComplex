@@ -249,7 +249,9 @@ body.player-open { overflow: hidden; }
 .fullscreen-player-stage > .video-frame { width: 100%; height: 100%; max-height: calc(100dvh - 122px); aspect-ratio: auto; border: 0; border-radius: 0; }
 .fullscreen-player-stage video { object-fit: contain; }
 .fullscreen-player-stage .player-status { position: absolute; right: 24px; bottom: 12px; z-index: 2; min-height: 32px; padding: 6px 9px; border-radius: 999px; background: rgba(3,2,5,.72); backdrop-filter: blur(8px); }
-.fullscreen-player-stage .player-status b { display: none; }
+.player-status .video-quality { flex-shrink: 0; font-size: 10px; letter-spacing: 0; white-space: nowrap; }
+.fullscreen-player-stage .player-status { max-width: calc(100% - 32px); }
+.fullscreen-player-stage .player-status .video-quality { display: inline-flex; }
 .fullscreen-player-help { margin: 8px 0 0; color: #877c8f; font-size: 10px; text-align: center; }
 .fullscreen-player:fullscreen, .fullscreen-player:-webkit-full-screen { width: 100vw; height: 100vh; }
 
