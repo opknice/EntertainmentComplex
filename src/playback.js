@@ -28,7 +28,7 @@ export function playbackErrorMessage(error) {
     if (reason === 'proxy request failed') return 'ระบบส่งต่อสตรีมเชื่อมต่อหรืออ่านข้อมูลต้นทางไม่สำเร็จ';
   } catch { /* Non-JSON upstream errors retain their HTTP status below. */ }
   if (status === 404) return 'ต้นทางไม่พบไฟล์สตรีม (HTTP 404) ยังยืนยันไม่ได้ว่าสัญญาณหมดอายุ';
-  if (status === 410) return 'ลิงก์สตรีมถูกยกเลิกหรือหมดอายุ (HTTP 410) ลองอัปเดตคลังแล้วเปิดใหม่';
+  if (status === 410) return 'ลิงก์นี้ไม่พร้อมให้บริการแล้ว (HTTP 410) ลองอัปเดตคลังแล้วเปิดใหม่';
   if ([401, 403].includes(status)) return `ต้นทางปฏิเสธสิทธิ์รับชม (HTTP ${status})`;
   if (status === 429) return 'ต้นทางจำกัดจำนวนการเชื่อมต่อ (HTTP 429) กรุณารอสักครู่แล้วลองใหม่';
   if (status >= 500) return `เซิร์ฟเวอร์ต้นทางขัดข้อง (HTTP ${status})`;
