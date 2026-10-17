@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'csv-parse/sync';
-import { syncOttCatalog } from './ott-catalog.mjs';
+import { cleanupOttGenerations, syncOttCatalog } from './ott-catalog.mjs';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dataDir = path.join(rootDir, 'data');
@@ -541,6 +541,7 @@ async function main() {
   writeAtomic(statePath, `${JSON.stringify(sourceState, null, 2)}\n`);
   writeAtomic(catalogPath, `${JSON.stringify(catalog)}\n`);
   writeAtomic(versionPath, `${JSON.stringify(versionDocument, null, 2)}\n`);
+  cleanupOttGenerations(rootDir, ottSummary.version, previousCatalog.ottSummary?.version);
 
   console.log(JSON.stringify({ version, total: movies.length, liveTotal: live.length, sportsTotal: sportItems.length, sportsHealth, changedSources: versionDocument.changedSources, added }));
 }
@@ -555,6 +556,7 @@ if (process.argv.includes('--ott-only')) {
     writeAtomic(catalogPath, JSON.stringify({ ...previous, version, ottTotal: ottSummary.total, ottSummary }));
     writeAtomic(versionPath, JSON.stringify({ ...versionDocument, version, ottTotal: ottSummary.total, ottSummary }, null, 2));
   }
+  if (!ottSummary.degraded) cleanupOttGenerations(rootDir, ottSummary.version, previous.ottSummary?.version);
 } else {
   await main();
 }

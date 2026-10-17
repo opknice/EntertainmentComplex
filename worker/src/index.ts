@@ -17,7 +17,7 @@ function corsHeaders(request: Request, env: Env): Headers {
   const headers = new Headers({
     'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
     'Access-Control-Allow-Headers': 'Range, Content-Type',
-    'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges, Content-Type',
+    'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges, Content-Type, X-Media-Base',
     'Vary': 'Origin',
   });
   if (allowed.includes(origin) || isLocalDevelopmentOrigin(origin)) headers.set('Access-Control-Allow-Origin', origin);
@@ -117,6 +117,16 @@ function validatedTarget(value: string): URL {
   const url = new URL(value);
   if (!['https:', 'http:'].includes(url.protocol) || isPrivateHostname(url.hostname)) throw new Error('target not allowed');
   return url;
+}
+
+function workerFetchTarget(target: URL): URL {
+  // Cloudflare rejects Worker subrequests to some public IPv4 HTTP origins
+  // with error 1003. sslip.io resolves the generated hostname back to the
+  // exact same public address, while retaining the original port and path.
+  if (target.protocol !== 'http:' || !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(target.hostname)) return target;
+  const output = new URL(target.href);
+  output.hostname = `${target.hostname.replaceAll('.', '-')}.sslip.io`;
+  return output;
 }
 
 async function signUrl(target: URL, payload: MediaPayload, env: Env, requestUrl: URL): Promise<string> {
@@ -229,21 +239,28 @@ async function handleMedia(request: Request, env: Env, requestUrl: URL): Promise
   const accept = request.headers.get('Accept');
   if (accept) upstreamHeaders.set('Accept', accept);
 
-  const upstreamRequest = new Request(target.href, { method: request.method, headers: upstreamHeaders, redirect: 'follow' });
+  const fetchTarget = workerFetchTarget(target);
+  const upstreamRequest = new Request(fetchTarget.href, { method: request.method, headers: upstreamHeaders, redirect: 'follow' });
   if (payload.h?.Origin) upstreamRequest.headers.set('Origin', payload.h.Origin);
   const upstream = await fetch(upstreamRequest, { cache: 'no-store' });
   const contentType = upstream.headers.get('Content-Type')?.toLowerCase() || '';
   const isManifest = contentType.includes('mpegurl') || /\.m3u8(?:$|\?)/i.test(target.href);
+  const mayContainManifest = contentType.startsWith('text/plain') || /\.txt(?:$|\?)/i.test(target.href);
   const isDashManifest = contentType.includes('dash+xml') || /\.mpd(?:$|\?)/i.test(target.href);
   const headers = copyResponseHeaders(upstream, request, env);
 
-  if (request.method === 'HEAD' || (!isManifest && !isDashManifest) || !upstream.ok) return new Response(upstream.body, { status: upstream.status, headers });
+  if (request.method === 'HEAD' || (!isManifest && !isDashManifest && !mayContainManifest) || !upstream.ok) return new Response(upstream.body, { status: upstream.status, headers });
   const manifest = await readBoundedText(upstream);
+  if (!isManifest && !isDashManifest && !manifest.replace(/^\uFEFF/, '').trimStart().startsWith('#EXTM3U')) {
+    headers.delete('Content-Length');
+    return new Response(manifest, { status: upstream.status, headers });
+  }
   const manifestUrl = new URL(upstream.url || target.href);
   const rewritten = isDashManifest ? manifest : await rewriteManifest(manifest, manifestUrl, payload, env, requestUrl);
   headers.set('Content-Type', isDashManifest ? 'application/dash+xml; charset=utf-8' : 'application/vnd.apple.mpegurl; charset=utf-8');
   headers.delete('Content-Length');
   headers.set('Cache-Control', 'private, max-age=30');
+  headers.set('X-Media-Base', manifestUrl.href);
   return new Response(rewritten, { status: upstream.status, headers });
 }
 

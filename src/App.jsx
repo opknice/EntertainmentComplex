@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useOttCatalog } from './useOttCatalog';
+import { detectStreamType, playable, proxyResourceUrl, sourceUrl } from './playback';
 
 const PAGE_SIZE = 30;
 const POLL_INTERVAL_MS = 15 * 60 * 1000;
@@ -474,11 +475,15 @@ function StreamPlayer({ item }) {
     let shakaPlayer;
     let cancelled = false;
     let cancelReadiness = () => {};
+    const controller = new AbortController();
     setStatus('กำลังเชื่อมต่อสตรีม…');
     async function setup() {
       if (item.playbackError) throw new Error(item.playbackError);
-      if (item.streamType === 'DASH' || item.clearKeys) {
+      const streamType = await detectStreamType(item, controller.signal);
+      if (cancelled) return;
+      if (streamType === 'DASH' || item.clearKeys) {
         const module = await import('shaka-player/dist/shaka-player.compiled.js');
+        if (cancelled) return;
         const shaka = module.default || module;
         shaka.polyfill.installAll();
         if (!shaka.Player.isBrowserSupported()) throw new Error('DASH_NOT_SUPPORTED');
@@ -486,29 +491,25 @@ function StreamPlayer({ item }) {
         await shakaPlayer.attach(video);
         if (item.clearKeys) shakaPlayer.configure({ drm: { clearKeys: item.clearKeys } });
         const network = shakaPlayer.getNetworkingEngine();
+        let manifestBase = sourceUrl(item);
         network.registerRequestFilter((type, request) => {
-          if (type !== shaka.net.NetworkingEngine.RequestType.MANIFEST) request.uris = request.uris.map((uri) => `${item.playUrl}&u=${encodeURIComponent(uri)}`);
+          request.uris = request.uris.map((uri) => /^https?:/i.test(uri) ? proxyResourceUrl(item.playUrl, uri, manifestBase) : uri);
         });
-        await new Promise((resolve, reject) => {
-          let readyCheck;
-          const finish = () => {
-            video.removeEventListener('canplay', finish);
-            window.clearInterval(readyCheck);
-            resolve();
-          };
-          const fail = (error) => {
-            video.removeEventListener('canplay', finish);
-            window.clearInterval(readyCheck);
-            reject(error);
-          };
-          video.addEventListener('canplay', finish, { once: true });
-          readyCheck = window.setInterval(() => { if (video.readyState >= 3) finish(); }, 150);
-          shakaPlayer.load(item.playUrl, null, item.streamType === 'DASH' ? 'application/dash+xml' : 'application/x-mpegurl').then(finish, fail);
+        network.registerResponseFilter((type, response) => {
+          if (type === shaka.net.NetworkingEngine.RequestType.MANIFEST) {
+            manifestBase = response.headers['x-media-base'] || manifestBase;
+            response.uri = manifestBase;
+          }
         });
+        shakaPlayer.addEventListener('error', (event) => { if (!cancelled) setStatus(`โหลดสตรีมไม่สำเร็จ (Shaka ${event.detail?.code || 'error'})`); });
+        await Promise.all([
+          playable(video, (cancel) => { cancelReadiness = cancel; }),
+          shakaPlayer.load(item.playUrl, null, streamType === 'DASH' ? 'application/dash+xml' : 'application/x-mpegurl'),
+        ]);
       } else {
         const { default: Hls } = await import('hls.js');
         if (cancelled) return;
-        if (Hls.isSupported() && (item.streamType === 'HLS' || /\.m3u8/i.test(item.playUrl))) {
+        if (Hls.isSupported() && streamType === 'HLS') {
           hls = new Hls({ enableWorker: true, lowLatencyMode: true });
           hls.loadSource(item.playUrl);
           hls.attachMedia(video);
@@ -540,8 +541,10 @@ function StreamPlayer({ item }) {
             hls.on(Hls.Events.ERROR, (_event, data) => { if (data.fatal) fail(data.details || data.type); });
           });
         } else {
+          const readiness = playable(video, (cancel) => { cancelReadiness = cancel; });
           video.src = item.playUrl;
           video.load();
+          await readiness;
         }
       }
       if (!cancelled) {
@@ -550,10 +553,12 @@ function StreamPlayer({ item }) {
       }
     }
     setup().catch((playerError) => {
+      cancelReadiness();
+      if (cancelled) return;
       console.error('player setup failed', playerError);
       setStatus(playerError?.message === 'DASH_NOT_SUPPORTED' ? 'เบราว์เซอร์นี้ไม่รองรับ DASH' : `โหลดสตรีมไม่สำเร็จ${playerError?.message ? ` (${playerError.message})` : ''}`);
     });
-    return () => { cancelled = true; cancelReadiness(); hls?.destroy(); shakaPlayer?.destroy(); video.removeAttribute('src'); video.load(); };
+    return () => { cancelled = true; controller.abort(); cancelReadiness(); hls?.destroy(); shakaPlayer?.destroy(); video.removeAttribute('src'); video.load(); };
   }, [item]);
   return <><div className="video-frame"><video ref={videoRef} controls playsInline poster={item.logo || undefined} /></div><div className="player-status"><span className="status-dot" /><span>{status}</span><b>SECURE STREAM</b></div></>;
 }

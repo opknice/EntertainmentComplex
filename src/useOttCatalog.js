@@ -35,7 +35,7 @@ export function useOttCatalog(enabled, summary) {
     const parts = [...new Set(entries.map((item) => item.ottPart))];
     const chunks = await Promise.all(parts.map((part) => {
       if (!cache.current.has(part)) {
-        const pending = readJson(`/data/ott/part-${part}.json`).then((data) => {
+        const pending = readJson(`${index.partsBase || '/data/ott'}/part-${part}.json`).then((data) => {
           if (data.version !== index.version) throw new Error('คลังเปลี่ยนแล้ว กรุณาเปิดหมวด OTT ใหม่');
           if (current === generation.current) setLoaded((previous) => ({ ...previous, ...Object.fromEntries(data.items.map((item) => [item.id, item])) }));
           return data.items;

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
-import { parseOttPlaylist } from './ott-catalog.mjs';
+import { cleanupOttGenerations, parseOttPlaylist } from './ott-catalog.mjs';
 
 test('preserves movies, series, live groups and quoted commas without following status/trap URLs', () => {
   const { items, placeholders } = parseOttPlaylist(`#EXTM3U
@@ -53,4 +56,32 @@ test('stable identity survives unrelated insertions while repeated source entrie
   assert.notEqual(original[0].id, original[1].id);
   assert.equal(original[0].id, changed[1].id);
   assert.equal(original[1].id, changed[2].id);
+});
+
+test('unknown extensions stay AUTO while text playlists are recognized as HLS', () => {
+  const { items } = parseOttPlaylist(`#EXTM3U
+#EXTINF:-1,Extensionless video
+https://media.example/stream
+#EXTINF:-1,Text HLS
+https://media.example/playlist.txt`);
+  assert.equal(items[0].streamType, 'AUTO');
+  assert.equal(items[1].streamType, 'HLS');
+});
+
+test('generation cleanup retains current and previous catalogs only', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ott-generations-'));
+  const folder = path.join(root, 'public/data/ott');
+  const current = 'a'.repeat(20) + '-current';
+  const previous = 'b'.repeat(20) + '-previous';
+  const stale = 'c'.repeat(20) + '-stale';
+  fs.mkdirSync(path.join(folder, current), { recursive: true });
+  fs.mkdirSync(path.join(folder, previous));
+  fs.mkdirSync(path.join(folder, stale));
+  fs.mkdirSync(path.join(folder, 'unrelated'));
+  try {
+    cleanupOttGenerations(root, current, previous);
+    assert.deepEqual(fs.readdirSync(folder).sort(), [current, previous, 'unrelated'].sort());
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
