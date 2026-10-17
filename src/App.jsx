@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useOttCatalog } from './useOttCatalog';
 import StreamPlayer from './StreamPlayer';
 
@@ -61,10 +62,6 @@ function getItemSection(catalog, id) {
   return 'movies';
 }
 
-function hasUsefulPoster(item) {
-  return Boolean(item?.logo && /^https?:\/\//i.test(item.logo) && !item.logo.includes('ui-avatars.com'));
-}
-
 function recentMovies(catalog, limit = 24) {
   const byId = new Map(catalog.items.map((item) => [item.id, item]));
   const pinned = (catalog.recent || []).map((id) => byId.get(id)).filter(Boolean);
@@ -78,7 +75,7 @@ function recentMovies(catalog, limit = 24) {
 function routeFromLocation() {
   const parts = window.location.pathname.split('/').filter(Boolean).map(decodeURIComponent);
   if (!parts.length) return { name: 'home' };
-  if (parts[0] === 'category' && sections[parts[1]]) return { name: 'category', section: parts[1] };
+  if (parts[0] === 'category' && sections[parts[1]]) return { name: 'category', section: parts[1], search: window.location.search };
   if (parts[0] === 'details' && sections[parts[1]] && parts[2]) return { name: 'details', section: parts[1], id: parts[2] };
   if (parts[0] === 'watch' && sections[parts[1]] && parts[2]) return { name: 'watch', section: parts[1], id: parts[2] };
   return { name: 'not-found' };
@@ -227,6 +224,9 @@ function SyncButton({ catalog, checking, manualState, onManualUpdate }) {
 
 function Header({ catalog, route, checking, manualState, onManualUpdate, onPlay }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInputRef = useRef(null);
+  const searchToggleRef = useRef(null);
   const [query, setQuery] = useState('');
   const activeSection = route.section || 'movies';
   const suggestions = useMemo(() => {
@@ -238,20 +238,29 @@ function Header({ catalog, route, checking, manualState, onManualUpdate, onPlay 
   const submitSearch = (event) => {
     event.preventDefault();
     const value = query.trim();
-    if (!value) return;
+    if (!value) { searchInputRef.current?.focus(); return; }
     setMenuOpen(false);
+    setSearchOpen(false);
+    event.currentTarget.querySelector(':focus')?.blur();
     navigate(`/category/${activeSection}?q=${encodeURIComponent(value)}`);
+  };
+
+  const toggleSearch = () => {
+    if (searchOpen) { setSearchOpen(false); return; }
+    // Reveal before focusing within the tap handler so mobile keyboards can open.
+    flushSync(() => { setSearchOpen(true); setMenuOpen(false); });
+    searchInputRef.current?.focus();
   };
 
   return (
     <>
-      <header className="site-header">
+      <header className={`site-header${menuOpen ? ' menu-is-open' : ''}`}>
         <div className="header-inner">
           <Link className="brand" to="/" aria-label="Entertainment Complex หน้าแรก">
             <img className="brand-mark" src="/assets/entertainment-complex-logo.png" alt="" />
             <span className="brand-copy"><strong>entertainment</strong><small>complex</small></span>
           </Link>
-          <nav className={`primary-nav${menuOpen ? ' is-open' : ''}`} aria-label="เมนูหลัก">
+          <nav id="primary-navigation" className={`primary-nav${menuOpen ? ' is-open' : ''}`} aria-label="เมนูหลัก">
             <div className="mobile-nav-head"><span>ENTERTAINMENT COMPLEX</span><button type="button" onClick={() => setMenuOpen(false)} aria-label="ปิดเมนู">×</button></div>
             <Link to="/" className={route.name === 'home' ? 'active' : ''} onClick={() => setMenuOpen(false)}>หน้าแรก</Link>
             {Object.entries(sections).map(([id, meta]) => (
@@ -259,21 +268,24 @@ function Header({ catalog, route, checking, manualState, onManualUpdate, onPlay 
             ))}
             <div className="mobile-sync"><SyncButton catalog={catalog} checking={checking} manualState={manualState} onManualUpdate={onManualUpdate} /></div>
           </nav>
-          <form className="header-search" role="search" onSubmit={submitSearch}>
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาหนัง ช่อง หรือกีฬา…" aria-label="ค้นหา" />
-            {query && <button className="search-clear" type="button" onClick={() => setQuery('')} aria-label="ล้างการค้นหา">×</button>}
+          <button ref={searchToggleRef} className="search-toggle" type="button" aria-label={searchOpen ? 'ปิดช่องค้นหา' : 'เปิดช่องค้นหา'} aria-controls="header-search" aria-expanded={searchOpen} onClick={toggleSearch}>{searchOpen ? '×' : '⌕'}</button>
+          <form id="header-search" className={`header-search${searchOpen ? ' is-open' : ''}`} role="search" onSubmit={submitSearch} onKeyDown={(event) => {
+            if (event.key === 'Escape' && searchOpen) { event.preventDefault(); setSearchOpen(false); searchToggleRef.current?.focus(); }
+          }}>
+            <input ref={searchInputRef} type="search" enterKeyHint="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาหนัง ช่อง หรือกีฬา…" aria-label="ค้นหา" />
+            {query && <button className="search-clear" type="button" onClick={() => { setQuery(''); searchInputRef.current?.focus(); }} aria-label="ล้างการค้นหา">×</button>}
             <button className="search-submit" type="submit" aria-label="ค้นหา">⌕</button>
             {suggestions.length > 0 && (
               <div className="search-results" role="listbox" aria-label="ผลการค้นหา">
                 {suggestions.map((item) => {
                   const section = getItemSection(catalog, item.id);
-                  return <button key={item.id} type="button" onClick={() => { setQuery(''); onPlay(item, section); }}><Poster item={item} /><span><strong>{displayTitle(item)}</strong><small>{sections[section].label} · {item.streamType || item.league || item.group}</small></span></button>;
+                  return <button key={item.id} type="button" onClick={() => { setQuery(''); setSearchOpen(false); onPlay(item, section); }}><Poster item={item} /><span><strong>{displayTitle(item)}</strong><small>{sections[section].label} · {item.streamType || item.league || item.group}</small></span></button>;
                 })}
               </div>
             )}
           </form>
           <div className="desktop-sync"><SyncButton catalog={catalog} checking={checking} manualState={manualState} onManualUpdate={onManualUpdate} /></div>
-          <button className="menu-toggle" type="button" aria-expanded={menuOpen} onClick={() => setMenuOpen((value) => !value)} aria-label="เปิดเมนู"><span /><span /><span /></button>
+          <button className="menu-toggle" type="button" aria-controls="primary-navigation" aria-expanded={menuOpen} onClick={() => { setSearchOpen(false); setMenuOpen((value) => !value); }} aria-label="เปิดเมนู"><span /><span /><span /></button>
         </div>
       </header>
       {menuOpen && <button className="menu-backdrop" type="button" aria-label="ปิดเมนู" onClick={() => setMenuOpen(false)} />}
@@ -282,22 +294,24 @@ function Header({ catalog, route, checking, manualState, onManualUpdate, onPlay 
 }
 
 function Poster({ item, className = '' }) {
-  if (item.logo && !item.logo.includes('ui-avatars.com')) return <img className={className} src={item.logo} alt="" loading="lazy" referrerPolicy="no-referrer" />;
+  const [failedLogo, setFailedLogo] = useState('');
+  if (item.logo && !item.logo.includes('ui-avatars.com') && failedLogo !== item.logo) return <img className={className} src={item.logo} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailedLogo(item.logo)} />;
   return <span className={`poster-fallback ${className}`} aria-hidden="true">{item.awayLogo ? 'VS' : 'EC'}</span>;
 }
 
 function MediaCard({ item, section, compact = false, onPlay }) {
   const title = displayTitle(item);
+  const isChannel = section === 'live' || (section === 'ott' && item.kind === 'live');
   return (
-    <article className={`media-card${compact ? ' is-compact' : ''}${section === 'sports' ? ' is-sport' : ''}${section === 'ott' && item.kind === 'live' ? ' is-channel' : ''}`}>
-      <button className="media-poster" type="button" onClick={() => onPlay(item, section)} aria-label={`เล่น ${title}`}>
-        {section === 'sports' && item.awayLogo ? <span className="team-match"><Poster item={item} /><b>VS</b><img src={item.awayLogo} alt="" loading="lazy" referrerPolicy="no-referrer" /></span> : <Poster item={item} />}
+    <article className={`media-card${compact ? ' is-compact' : ''}${section === 'sports' ? ' is-sport' : ''}${isChannel ? ' is-channel' : ''}`}>
+      <button className="media-poster" type="button" onClick={() => onPlay(item, section)} aria-label={`เล่น ${title}`} title={title}>
+        {section === 'sports' && item.awayLogo ? <span className="team-match"><Poster item={item} /><b>VS</b><Poster item={{ logo: item.awayLogo }} /></span> : <Poster item={item} />}
         <span className="poster-shade" />
         <span className="type-badge">{section === 'sports' ? (item.status || 'LIVE') : item.streamType || 'VIDEO'}</span>
         <span className="play-hover">▶ รับชม</span>
       </button>
       <div className="media-body">
-        <h3><button type="button" onClick={() => onPlay(item, section)}>{title}</button></h3>
+        <h3><button type="button" onClick={() => onPlay(item, section)} title={title}>{title}</button></h3>
         {section === 'sports' && <p className="event-time">{formatEventTime(item.time)}</p>}
         <p>{section === 'movies' ? item.group || item.source : section !== 'sports' ? item.group : item.league || item.sport}</p>
       </div>
@@ -314,71 +328,22 @@ function Rail({ title, eyebrow, items, section, viewAll, onPlay }) {
   );
 }
 
-function Hero({ item, generatedAt, onPlay }) {
-  const title = displayTitle(item);
-  const backdrop = hasUsefulPoster(item) ? { backgroundImage: `linear-gradient(90deg, rgba(7,5,11,.98) 0%, rgba(7,5,11,.76) 48%, rgba(7,5,11,.25) 100%), linear-gradient(0deg, rgba(7,5,11,.92), rgba(7,5,11,.08) 68%), url("${item.logo.replaceAll('"', '%22')}")` } : undefined;
-  return (
-    <section className="feature-hero" style={backdrop} aria-label="รายการหนังอัปเดตใหม่">
-      <div className="feature-glow" />
-      <div className="feature-copy">
-        <span className="update-kicker"><i /> อัปเดตใหม่จากต้นทาง</span>
-        <h1>{title}</h1>
-        <p>รายการล่าสุดจากสัญญาณอัปเดตของคลัง พร้อมรับชมผ่านระบบ secure streaming ของ entertainment-complex</p>
-        <div className="feature-meta"><span>{item.streamType || 'วิดีโอ'}</span><span>{item.group || item.source || 'รายการใหม่'}</span><span>{formatSyncTime(generatedAt)}</span></div>
-        <div className="feature-actions"><button className="primary-button" type="button" onClick={() => onPlay(item, 'movies')}>▶ รับชมตอนนี้</button><Link className="secondary-button" to={`/details/movies/${encodeURIComponent(item.id)}`}>ดูรายละเอียด</Link></div>
-      </div>
-      <div className="feature-poster"><Poster item={item} /></div>
-    </section>
-  );
-}
-
 function HomePage({ catalog, loading, onPlay }) {
   const newest = useMemo(() => recentMovies(catalog, 20), [catalog]);
-  const heroItem = newest.find(hasUsefulPoster) || newest[0];
   const liveItems = catalog.live.slice(0, 12);
   const sportItems = catalog.sports.filter((item) => !['FT', 'Finished'].includes(item.status)).slice(0, 10);
   if (loading) return <PageLoading />;
   return (
     <main className="site-main home-page">
-      {heroItem ? <Hero item={heroItem} generatedAt={catalog.generatedAt} onPlay={onPlay} /> : <EmptyState title="ยังไม่มีรายการหนัง" />}
-      <div className="home-layout">
-        <aside className="home-sidebar left-sidebar">
-          <PanelTitle icon="◈" title="เลือกดูง่ายๆ" />
-          <Link className="quick-category movie" to="/category/movies"><span>▶</span><div><strong>หนังทั้งหมด</strong><small>{catalog.total.toLocaleString('th-TH')} เรื่อง</small></div><b>›</b></Link>
-          <Link className="quick-category live" to="/category/live"><span>●</span><div><strong>ทีวีสด</strong><small>{catalog.liveTotal.toLocaleString('th-TH')} ช่อง</small></div><b>›</b></Link>
-          <Link className="quick-category sports" to="/category/sports"><span>◆</span><div><strong>กีฬาสด</strong><small>{catalog.sportsTotal.toLocaleString('th-TH')} รายการ</small></div><b>›</b></Link>
-          <Link className="quick-category ott" to="/category/ott"><span>▣</span><div><strong>OTT Playlist</strong><small>{catalog.ottTotal.toLocaleString('th-TH')} รายการ</small></div><b>›</b></Link>
-          <div className="sidebar-note"><span>NO ADS</span><strong>ดูต่อเนื่อง ไม่มีอะไรมารบกวน</strong><p>เลือกเนื้อหาแล้วเริ่มรับชมได้ทันที</p></div>
-        </aside>
-        <div className="home-content">
-          <section className="intro-panel"><span className="eyebrow">ENTERTAINMENT COMPLEX</span><h2>หนัง ทีวีสด และกีฬา อยู่ในที่เดียว</h2><p>ค้นหา เลือก และรับชมได้ตรงไปตรงมา ทุกหน้าถูกออกแบบให้เนื้อหาเป็นจุดเด่น โดยไม่มีพื้นที่โฆษณาแทรก</p></section>
-          <Rail eyebrow="JUST UPDATED" title="หนังอัปเดตล่าสุด" items={newest.slice(0, 12)} section="movies" viewAll="/category/movies" onPlay={onPlay} />
-          <Rail eyebrow="LIVE NOW" title="ช่องทีวีสด" items={liveItems} section="live" viewAll="/category/live" onPlay={onPlay} />
-          <Rail eyebrow="SPORTS" title="โปรแกรมกีฬาที่รับชมได้" items={sportItems} section="sports" viewAll="/category/sports" onPlay={onPlay} />
-        </div>
-        <aside className="home-sidebar right-sidebar">
-          <PanelTitle icon="✦" title="สถานะคลัง" />
-          <div className="library-stat"><strong>{catalog.total.toLocaleString('th-TH')}</strong><span>หนัง</span></div>
-          <div className="library-stat"><strong>{catalog.liveTotal.toLocaleString('th-TH')}</strong><span>ช่องทีวี</span></div>
-          <div className="library-stat"><strong>{catalog.sportsTotal.toLocaleString('th-TH')}</strong><span>รายการกีฬา</span></div>
-          <div className="library-stat"><strong>{catalog.ottTotal.toLocaleString('th-TH')}</strong><span>รายการ OTT</span></div>
-          <div className="last-update"><small>อัปเดตล่าสุด</small><strong>{formatSyncTime(catalog.generatedAt)}</strong><p>ระบบตรวจข้อมูลใหม่อัตโนมัติทุก 15 นาที</p></div>
-        </aside>
-      </div>
+      {newest.length ? <Rail eyebrow="JUST UPDATED" title="หนังอัปเดตล่าสุด" items={newest.slice(0, 12)} section="movies" viewAll="/category/movies" onPlay={onPlay} /> : <EmptyState title="ยังไม่มีรายการหนัง" />}
+      <Rail eyebrow="LIVE NOW" title="ช่องทีวีสด" items={liveItems} section="live" viewAll="/category/live" onPlay={onPlay} />
+      <Rail eyebrow="SPORTS" title="โปรแกรมกีฬาที่รับชมได้" items={sportItems} section="sports" viewAll="/category/sports" onPlay={onPlay} />
     </main>
   );
 }
 
-function PanelTitle({ icon, title }) {
-  return <div className="panel-title"><span>{icon}</span><h2>{title}</h2></div>;
-}
-
-function useQueryState() {
-  return useMemo(() => new URLSearchParams(window.location.search), [window.location.search]);
-}
-
-function CategoryPage({ catalog, section, loading, onPlay, onVisibleItems }) {
-  const params = useQueryState();
+function CategoryPage({ catalog, section, initialSearch, loading, onPlay, onVisibleItems }) {
+  const params = useMemo(() => new URLSearchParams(initialSearch), [initialSearch]);
   const [query, setQuery] = useState(params.get('q') || '');
   const [filter, setFilter] = useState(params.get('filter') || '');
   const [page, setPage] = useState(Math.max(1, Number(params.get('page')) || 1));
@@ -408,24 +373,18 @@ function CategoryPage({ catalog, section, loading, onPlay, onVisibleItems }) {
     window.history.replaceState({}, '', `/category/${section}${suffix}`);
   }, [query, filter, safePage, section, loading]);
 
-  useEffect(() => { setQuery(params.get('q') || ''); setFilter(params.get('filter') || ''); setPage(Math.max(1, Number(params.get('page')) || 1)); }, [section]);
-
   if (loading) return <PageLoading />;
   return (
     <main className="site-main inner-page">
-      <Breadcrumbs items={[['หน้าแรก', '/'], [meta.label]]} />
-      <section className="archive-hero"><span className="archive-icon">{section === 'movies' ? '▶' : section === 'live' ? '●' : '◆'}</span><div><span className="eyebrow">{meta.eyebrow}</span><h1>{meta.label}</h1><p>เลือกดูจากคลังทั้งหมดได้อย่างรวดเร็ว ไม่มีโฆษณาหรือหน้าต่างรบกวน</p></div><strong>{filtered.length.toLocaleString('th-TH')}<small>รายการ</small></strong></section>
       <div className="catalog-layout">
-        <aside className="filter-panel">
-          <PanelTitle icon="⌁" title="ค้นหาและกรอง" />
+        <section className="filter-panel" aria-label="ค้นหาและกรอง">
           <label><span>ค้นหา</span><input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={`ค้นหา${meta.label}…`} /></label>
           <label><span>{meta.filterLabel}</span><select value={filter} onChange={(event) => { setFilter(event.target.value); setPage(1); }}><option value="">ทั้งหมด</option>{filterOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
           {(query || filter) && <button className="clear-filters" type="button" onClick={() => { setQuery(''); setFilter(''); setPage(1); }}>ล้างตัวกรอง</button>}
-          <div className="filter-summary"><span>กำลังแสดง</span><strong>{visible.length.toLocaleString('th-TH')}</strong><small>จาก {filtered.length.toLocaleString('th-TH')} รายการ</small></div>
-        </aside>
+        </section>
         <section className="catalog-content" aria-live="polite">
-          <div className="catalog-heading"><div><span className="eyebrow">BROWSE</span><h2>{query ? `ผลการค้นหา “${query}”` : filter || `${meta.label}ทั้งหมด`}</h2></div><span>หน้า {safePage.toLocaleString('th-TH')} / {pageCount.toLocaleString('th-TH')}</span></div>
-          {visible.length ? <div className={`catalog-grid${section === 'sports' ? ' sport-grid' : ''}`}>{visible.map((item) => <MediaCard key={item.id} item={item} section={section} onPlay={onPlay} />)}</div> : <EmptyState title="ไม่พบรายการที่ค้นหา" description="ลองใช้คำค้นที่สั้นลงหรือเปลี่ยนตัวกรอง" />}
+          <div className="catalog-heading"><h1>{query ? `ผลการค้นหา “${query}”` : filter || `${meta.label}ทั้งหมด`}</h1><div className="catalog-meta"><span>แสดง {visible.length.toLocaleString('th-TH')} จาก {filtered.length.toLocaleString('th-TH')} รายการ</span><span>หน้า {safePage.toLocaleString('th-TH')} / {pageCount.toLocaleString('th-TH')}</span></div></div>
+          {visible.length ? <div className="catalog-grid">{visible.map((item) => <MediaCard key={item.id} item={item} section={section} onPlay={onPlay} />)}</div> : <EmptyState title="ไม่พบรายการที่ค้นหา" description="ลองใช้คำค้นที่สั้นลงหรือเปลี่ยนตัวกรอง" />}
           <Pagination page={safePage} count={pageCount} onChange={setPage} />
         </section>
       </div>
@@ -575,7 +534,7 @@ export default function App() {
 
   let page;
   if (route.name === 'home') page = <HomePage catalog={catalog} loading={loading} onPlay={openPlayer} />;
-  else if (route.name === 'category') page = <CategoryPage key={route.section} catalog={catalog} section={route.section} loading={pageLoading} onPlay={openPlayer} onVisibleItems={route.section === 'ott' ? ott.loadVisible : undefined} />;
+  else if (route.name === 'category') page = <CategoryPage key={`${route.section}:${route.search}`} catalog={catalog} section={route.section} initialSearch={route.search} loading={pageLoading} onPlay={openPlayer} onVisibleItems={route.section === 'ott' ? ott.loadVisible : undefined} />;
   else if (route.name === 'details') page = <DetailPage catalog={catalog} section={route.section} id={route.id} loading={pageLoading} onPlay={openPlayer} />;
   else if (route.name === 'watch') page = <WatchPage catalog={catalog} section={route.section} id={route.id} loading={pageLoading} />;
   else page = <NotFound />;
