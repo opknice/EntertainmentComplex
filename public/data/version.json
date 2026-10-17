@@ -1,18 +1,18 @@
 {
-  "version": "3a3a9dbd0d4b20221626ccf1",
-  "catalogHash": "8acd2f5d331ccf7a10cb",
+  "version": "0ab2e45f8f9326c5f474-mvbrod52",
+  "catalogHash": "0ab2e45f8f9326c5f474",
   "proxyBaseUrl": "https://doowiseplay-proxy.kasthanakrit4.workers.dev",
-  "generatedAt": "2026-10-16T13:33:36.736Z",
-  "expiresAt": 1794749616736,
-  "total": 13860,
+  "generatedAt": "2026-10-17T02:17:56.870Z",
+  "expiresAt": 1794795476870,
+  "total": 13878,
   "liveTotal": 102,
-  "sportsTotal": 253,
+  "sportsTotal": 276,
   "ottTotal": 104069,
   "ottSummary": {
-    "version": "9c2313dfbba2ded61840-mvbrmefl",
+    "version": "9c2313dfbba2ded61840-mvbrobq1",
     "total": 104069,
-    "generatedAt": "2026-10-17T02:16:25.233Z",
-    "indexUrl": "/data/ott/9c2313dfbba2ded61840-mvbrmefl/index.json",
+    "generatedAt": "2026-10-17T02:17:55.033Z",
+    "indexUrl": "/data/ott/9c2313dfbba2ded61840-mvbrobq1/index.json",
     "placeholders": 4,
     "degraded": false
   },
@@ -29,21 +29,5 @@
   ],
   "changedSources": [],
   "added": 0,
-  "recent": [
-    "0v27IRkvCJQfoNbgFw_LG4",
-    "MFIGYOSwqeVIR4U8OwNDZP",
-    "9BKb8fDwL2zDGpsCXsIPBy",
-    "g71RMZ5Q_DVQdrkMKaCsCC",
-    "2c3jRZnQQ-pQ3Dnp4vyOkg",
-    "RR8ChXBlvJsaiTU7knSOCD",
-    "CZ4UBv35wCoj7qLsJSoQa1",
-    "NPQyBtG7CiYsOoOWpUR0ll",
-    "vml0l4zk05bGfOvgZ1bAno",
-    "2MZXCoIafgiaKS07ORg8bU",
-    "1ZOulkq8v3fmddhtVywz9O",
-    "d6oEbRB_PgO4Rbz_1B4wg4",
-    "QEqCDojFJ_S_rcI7ALcOaP",
-    "HdUsRv_XiDH8lgQ9QiN6GU",
-    "tZi0mOgFDcgwh15A5VKBB5"
-  ]
+  "recent": []
 }
