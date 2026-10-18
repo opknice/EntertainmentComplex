@@ -4,6 +4,7 @@ import { startVideoPresentation } from './player-presentation';
 import PlayerControls from './PlayerControls';
 import { usePlaybackProgress } from './usePlaybackProgress';
 import ResumePrompt from './ResumePrompt';
+import { createRecoveryBudget } from './playback-recovery';
 
 export default function StreamPlayer({ item, mediaRef, autoFullscreen = false, live = false, resumeId, onClose }) {
   const internalVideoRef = useRef(null);
@@ -15,11 +16,20 @@ export default function StreamPlayer({ item, mediaRef, autoFullscreen = false, l
   const [actionRequired, setActionRequired] = useState('');
   const [nativePresentation, setNativePresentation] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [generation, setGeneration] = useState(0);
+  const recovery = useRef(null);
+  const retryPosition = useRef(null);
   const applyPresentation = ({ playing }) => {
     setActionRequired(playing ? '' : 'play');
     if (!playing) setStatus('แตะปุ่มเล่นเพื่อเริ่มรับชม');
   };
   const startPlayback = () => {
+    if (failed) {
+      if (!live && videoRef.current?.currentTime > 0) retryPosition.current = videoRef.current.currentTime;
+      recovery.current?.budget.reset();
+      setGeneration(value => value + 1);
+      return;
+    }
     const video = videoRef.current;
     setStatus('กำลังเริ่มรับชม…');
     startVideoPresentation(video, autoFullscreen).then(result => { if (video.isConnected && videoRef.current === video) applyPresentation(result); });
@@ -44,6 +54,45 @@ export default function StreamPlayer({ item, mediaRef, autoFullscreen = false, l
     let terminalError = false;
     let cancelReadiness = () => {};
     let lastHttpStatus;
+    if (recovery.current?.item !== item) {
+      recovery.current = { item, budget: createRecoveryBudget() };
+      retryPosition.current = null;
+    }
+    const budget = recovery.current.budget;
+    let retryTimer;
+    let retryPending = false;
+    let loaded = false;
+    let lastPosition = video.currentTime;
+    let lastAdvance = performance.now();
+    const scheduleRecovery = error => {
+      if (!live || cancelled || retryPending) return retryPending;
+      // Do not undo a deliberate pause; initial load and native media errors
+      // may legitimately have paused=true without a user pause.
+      if (loaded && video.paused && !video.error && !video.ended) return false;
+      const next = budget.next(error);
+      if (!next) return false;
+      retryPending = true;
+      terminalError = true;
+      setFailed(false);
+      setStatus(`สัญญาณสะดุด · เชื่อมต่อใหม่ใน ${next.delay / 1000} วินาที (${next.attempt}/5)`);
+      const retry = () => {
+        if (cancelled) return;
+        if (loaded && video.paused && !video.error && !video.ended) {
+          retryPending = false;
+          setFailed(true);
+          setStatus('หยุดพัก · กดเชื่อมต่อใหม่เมื่อต้องการรับชม');
+          return;
+        }
+        if (navigator.onLine === false || document.hidden) {
+          setStatus('รอเครือข่ายหรือกลับมาที่หน้ารับชม แล้วจะเชื่อมต่อใหม่');
+          retryTimer = setTimeout(retry, 2000);
+          return;
+        }
+        setGeneration(value => value + 1);
+      };
+      retryTimer = setTimeout(retry, next.delay);
+      return true;
+    };
     setStatus('กำลังโหลดคุณภาพสูงสุดจากต้นทาง…');
     setResolution('');
     setActionRequired('');
@@ -58,11 +107,40 @@ export default function StreamPlayer({ item, mediaRef, autoFullscreen = false, l
         setActionRequired('');
       }
     };
-    const waiting = () => { if (!cancelled && !terminalError) setStatus('กำลังบัฟเฟอร์คุณภาพสูงสุด…'); };
+    const waiting = () => { budget.stalled(); if (!cancelled && !terminalError) setStatus('กำลังบัฟเฟอร์คุณภาพสูงสุด…'); };
+    const watchdog = setInterval(() => {
+      if (!live || cancelled || retryPending || terminalError) return;
+      const now = performance.now();
+      if (video.paused || video.seeking || document.hidden || navigator.onLine === false) {
+        lastAdvance = now; lastPosition = video.currentTime; budget.stalled(); return;
+      }
+      if (Math.abs(video.currentTime - lastPosition) > 0.05) {
+        lastAdvance = now; lastPosition = video.currentTime; budget.progressing(now);
+      } else {
+        budget.stalled();
+        if (now - lastAdvance >= 30000 && !scheduleRecovery(new Error('playback_timeout'))) {
+          terminalError = true;
+          setFailed(true);
+          setStatus('สัญญาณยังไม่กลับมาหลังลองเชื่อมต่อใหม่ · กดเชื่อมต่อใหม่เพื่อลองอีกครั้ง');
+        }
+      }
+    }, 2000);
+    const mediaError = () => {
+      if (!loaded || cancelled) return; // Initial errors are owned by playable().
+      const error = new Error(`video_error_${video.error?.code || 'unknown'}`);
+      if (!scheduleRecovery(error)) {
+        terminalError = true;
+        setFailed(true);
+        setStatus(playbackErrorMessage(error));
+      }
+    };
+    const liveEnded = () => { if (live) scheduleRecovery(new Error('EarlyEof')); };
     video.addEventListener('resize', updateResolution);
     video.addEventListener('loadedmetadata', updateResolution);
     video.addEventListener('playing', playing);
     video.addEventListener('waiting', waiting);
+    video.addEventListener('error', mediaError);
+    video.addEventListener('ended', liveEnded);
 
     async function setup() {
       await previousCleanup;
@@ -74,6 +152,7 @@ export default function StreamPlayer({ item, mediaRef, autoFullscreen = false, l
       const fatal = new Promise((_resolve, reject) => { rejectFatal = reject; });
       const fail = (error) => {
         if (cancelled) return;
+        if (scheduleRecovery(error)) { rejectFatal(error); return; }
         terminalError = true;
         setFailed(true);
         setStatus(playbackErrorMessage(error));
@@ -93,6 +172,7 @@ export default function StreamPlayer({ item, mediaRef, autoFullscreen = false, l
           await shakaPlayer.attach(video);
           if (cancelled) return;
           shakaPlayer.configure(highestShakaConfig);
+          if (live) shakaPlayer.configure({ streaming: { rebufferingGoal: 6 } });
           if (item.clearKeys) shakaPlayer.configure({ drm: { clearKeys: item.clearKeys } });
           const network = shakaPlayer.getNetworkingEngine();
           let manifestBase = sourceUrl(item);
@@ -107,7 +187,9 @@ export default function StreamPlayer({ item, mediaRef, autoFullscreen = false, l
               response.uri = manifestBase;
             }
           });
-          shakaPlayer.addEventListener('error', (event) => fail(event.detail));
+          shakaPlayer.addEventListener('error', (event) => {
+            if (event.detail.severity !== shaka.util.Error.Severity.RECOVERABLE) fail(event.detail);
+          });
           let loaded = false;
           shakaPlayer.addEventListener('trackschanged', () => { if (loaded && !cancelled) lockShakaToHighest(shakaPlayer); });
           const mime = streamType === 'DASH' ? 'application/dash+xml' : streamType === 'MKV' ? 'video/x-matroska' : 'application/x-mpegurl';
@@ -136,7 +218,7 @@ export default function StreamPlayer({ item, mediaRef, autoFullscreen = false, l
           const { default: Hls } = await import('hls.js');
           if (cancelled) return;
           if (Hls.isSupported()) {
-            hls = new Hls(highestHlsConfig);
+            hls = new Hls({ ...highestHlsConfig, ...(live ? { liveSyncDurationCount: 6 } : {}) });
             hls.on(Hls.Events.MANIFEST_PARSED, () => {
               lockHlsToHighest(hls);
               hls.startLoad();
@@ -150,7 +232,11 @@ export default function StreamPlayer({ item, mediaRef, autoFullscreen = false, l
             });
             hls.on(Hls.Events.ERROR, (_event, data) => {
               if (data.response?.code) lastHttpStatus = data.response.code;
-              if (data.fatal) fail(new Error(data.response?.code ? 'HTTP ' + data.response.code : data.details || data.type));
+              if (data.fatal) {
+                const error = new Error(data.response?.code ? 'HTTP ' + data.response.code : data.details || data.type);
+                error.recoverable = [Hls.ErrorTypes.NETWORK_ERROR, Hls.ErrorTypes.MEDIA_ERROR].includes(data.type);
+                fail(error);
+              }
             });
             hls.loadSource(item.playUrl);
             hls.attachMedia(video);
@@ -162,6 +248,18 @@ export default function StreamPlayer({ item, mediaRef, autoFullscreen = false, l
       };
       await Promise.race([Promise.all([ready, load()]), fatal]);
       if (!cancelled) {
+        loaded = true;
+        lastAdvance = performance.now();
+        if (!live && retryPosition.current !== null) {
+          const position = retryPosition.current;
+          let seekable = false;
+          for (let index = 0; index < video.seekable.length; index += 1) {
+            if (position >= video.seekable.start(index) && position < video.seekable.end(index)) seekable = true;
+          }
+          if (!seekable) throw new Error('ยังกลับไปตำแหน่งเดิมไม่ได้ กรุณาลองเชื่อมต่อใหม่');
+          video.currentTime = position;
+          retryPosition.current = null;
+        }
         updateResolution();
         if (!progress.ready()) { setStatus('เลือกรับชมต่อหรือเริ่มใหม่'); return; }
         setStatus(video.paused ? 'พร้อมเล่น · คุณภาพสูงสุด' : 'กำลังเล่น');
@@ -171,28 +269,34 @@ export default function StreamPlayer({ item, mediaRef, autoFullscreen = false, l
     setup().catch((error) => {
       cancelReadiness();
       if (cancelled) return;
+      const failure = error?.message === 'stream_timeout' && lastHttpStatus ? new Error('HTTP ' + lastHttpStatus) : error;
+      const recovering = scheduleRecovery(failure);
       terminalError = true;
-      setFailed(true);
+      if (!recovering) setFailed(true);
       hls?.stopLoad();
       transportPlayer?.unload();
       cleanupDone.current = Promise.resolve(shakaPlayer?.unload()).catch(() => {});
-      setStatus(playbackErrorMessage(error?.message === 'stream_timeout' && lastHttpStatus ? new Error('HTTP ' + lastHttpStatus) : error));
+      if (!recovering) setStatus(playbackErrorMessage(failure));
     });
     return () => {
       cancelled = true;
+      clearTimeout(retryTimer);
+      clearInterval(watchdog);
       controller.abort();
       cancelReadiness();
       video.removeEventListener('resize', updateResolution);
       video.removeEventListener('loadedmetadata', updateResolution);
       video.removeEventListener('playing', playing);
       video.removeEventListener('waiting', waiting);
+      video.removeEventListener('error', mediaError);
+      video.removeEventListener('ended', liveEnded);
       hls?.destroy();
       transportPlayer?.destroy();
       cleanupDone.current = cleanupDone.current.then(() => shakaPlayer?.destroy()).catch(() => {});
       video.removeAttribute('src');
       video.load();
     };
-  }, [item, autoFullscreen]);
+  }, [item, autoFullscreen, live, generation]);
   return <div ref={surfaceRef} className="video-frame player-surface" data-player-surface="" tabIndex={0} role="group" aria-label="เครื่องเล่นวิดีโอ">
     <video ref={videoRef} data-playback-blocked={progress.blocked ? 'true' : 'false'} controls={nativePresentation} autoPlay={!progress.blocked} playsInline preload="auto" poster={item?.logo || undefined} />
     {progress.blocked && item ? <ResumePrompt progress={progress} loadError={failed ? status : ''} onClose={onClose} /> : <PlayerControls videoRef={videoRef} surfaceRef={surfaceRef} item={item} live={live} autoFullscreen={autoFullscreen} status={status} saveWarning={progress.warning} failed={failed} resolution={resolution} actionRequired={actionRequired} onClose={onClose} onStart={startPlayback} />}

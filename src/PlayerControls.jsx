@@ -81,6 +81,7 @@ export default function PlayerControls({ videoRef, surfaceRef, item, live, autoF
   const togglePlay = () => {
     const video = videoRef.current;
     wake();
+    if (failed) { onStart(); return; }
     if (video.paused || video.ended) resumePlayback(); else video.pause();
   };
   const seekBy = (delta, total = Math.abs(delta)) => {
@@ -193,7 +194,7 @@ export default function PlayerControls({ videoRef, surfaceRef, item, live, autoF
         <div><strong className="smart-player-title">{item ? item.title || 'รายการไม่มีชื่อ' : 'กำลังเตรียมรายการ…'}</strong><small className="player-status">{displayStatus}</small>{saveWarning && <small className="resume-save-warning" role="status">{saveWarning}</small>}</div>
         {onClose && <button type="button" className="smart-icon" onClick={onClose} aria-label="ปิดเครื่องเล่น"><PlayerIcon name="close" /></button>}
       </div>
-      {(actionRequired === 'play' || media.ended) && <button className="player-start primary-button" type="button" onClick={media.ended ? togglePlay : onStart}>{media.ended ? '↻ เล่นอีกครั้ง' : '▶ เล่นวิดีโอ'}</button>}
+      {(failed || actionRequired === 'play' || media.ended) && <button className="player-start primary-button" type="button" onClick={media.ended && !failed ? togglePlay : onStart}>{failed ? '↻ เชื่อมต่อใหม่' : media.ended ? '↻ เล่นอีกครั้ง' : '▶ เล่นวิดีโอ'}</button>}
       {(failed || !media.ready && !actionRequired) && <div className="player-loading" role="status">{status}</div>}
       <div className="smart-controls" hidden={!controlsVisible} onPointerDown={wake} onFocus={wake}>
         <div className="smart-seek-row">
