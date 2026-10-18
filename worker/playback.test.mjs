@@ -10,8 +10,8 @@ const originalTimingSafeEqual = crypto.subtle.timingSafeEqual;
 crypto.subtle.timingSafeEqual = timingSafeEqual;
 test.after(() => { globalThis.fetch = originalFetch; crypto.subtle.timingSafeEqual = originalTimingSafeEqual; });
 
-function signedUrl(source) {
-  const payload = Buffer.from(JSON.stringify({ u: source, r: '', a: 'player-test', o: [new URL(source).origin], e: Date.now() + 60000 })).toString('base64url');
+function signedUrl(source, fields = {}) {
+  const payload = Buffer.from(JSON.stringify({ u: source, r: '', a: 'player-test', o: [new URL(source).origin], e: Date.now() + 60000, ...fields })).toString('base64url');
   const signature = createHmac('sha256', environment.PROXY_SIGNING_KEY).update(payload).digest('base64url');
   return `https://proxy.example/v1/media?p=${payload}&s=${signature}`;
 }
@@ -66,4 +66,75 @@ test('HLS manifests still rewrite child URLs and AES key references', async () =
     assert.equal(parsed.origin, 'https://proxy.example');
     assert.equal(JSON.parse(Buffer.from(parsed.searchParams.get('p'), 'base64url')).u, expected);
   }
+});
+
+test('HTTP-IP redirects use the transport adapter at every hop while preserving canonical HLS resource bases', async () => {
+  const requests = [];
+  let released = 0;
+  globalThis.fetch = async request => {
+    requests.push({ url: request.url, redirect: request.redirect });
+    if (requests.length === 1) return new Response(new ReadableStream({ cancel() { released++; } }), { status: 302, headers: { Location: 'http://198.51.100.20:2005/live/index.m3u8' } });
+    if (requests.length === 2) return new Response('#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\n#EXTINF:6,\nsegment.ts\n', { headers: { 'Content-Type': 'application/x-mpegURL' } });
+    return new Response(new Uint8Array([0x47, 1, 2]), { headers: { 'Content-Type': 'video/mp2t' } });
+  };
+  const response = await worker.fetch(new Request(signedUrl('http://origin.example:2095/live.m3u8')), environment);
+  assert.equal(response.status, 200);
+  assert.equal(released, 1);
+  assert.equal(response.headers.get('x-media-base'), 'http://198.51.100.20:2005/live/index.m3u8');
+  const text = await response.text();
+  const segment = text.split('\n').find(line => line.startsWith('https:'));
+  const key = text.match(/URI="([^"]+)"/)[1];
+  for (const [url, suffix] of [[segment, 'segment.ts'], [key, 'key.bin']]) {
+    const parsed = new URL(url);
+    assert.equal(JSON.parse(Buffer.from(parsed.searchParams.get('p'), 'base64url')).u, 'http://198.51.100.20:2005/live/' + suffix);
+  }
+  await worker.fetch(new Request(segment), environment);
+  assert.deepEqual(requests, [
+    { url: 'http://origin.example:2095/live.m3u8', redirect: 'manual' },
+    { url: 'http://198-51-100-20.sslip.io:2005/live/index.m3u8', redirect: 'manual' },
+    { url: 'http://198-51-100-20.sslip.io:2005/live/segment.ts', redirect: 'manual' },
+  ]);
+});
+
+test('relative redirects retain media headers but do not forward authentication to another origin', async () => {
+  const seen = [];
+  globalThis.fetch = async request => {
+    seen.push({ method: request.method, auth: request.headers.get('authorization'), authInfo: request.headers.get('authinfo'), range: request.headers.get('range'), agent: request.headers.get('user-agent'), referer: request.headers.get('referer') });
+    if (seen.length === 1) return new Response(null, { status: 307, headers: { Location: './next' } });
+    if (seen.length === 2) return new Response(null, { status: 303, headers: { Location: 'http://cdn.example:2095/final' } });
+    return new Response(null, { headers: { 'Content-Type': 'video/mp4' } });
+  };
+  const url = signedUrl('http://origin.example:2095/start', { h: { Authorization: 'test-credential', AuthInfo: 'test-info' }, r: 'https://player.example/' });
+  const response = await worker.fetch(new Request(url, { method: 'HEAD', headers: { Range: 'bytes=0-1023' } }), environment);
+  assert.equal(response.status, 200);
+  assert.deepEqual(seen.map(x => [x.method, x.auth, x.authInfo]), [['HEAD', 'test-credential', 'test-info'], ['HEAD', 'test-credential', 'test-info'], ['HEAD', null, null]]);
+  assert.ok(seen.every(x => x.range === 'bytes=0-1023' && x.agent === 'player-test' && x.referer === 'https://player.example/'));
+});
+
+test('redirects reject private/unsupported destinations before fetching them and release their response bodies', async () => {
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    for (const target of ['http://127.0.0.1/private', 'http://10.0.0.1/private', 'http://[::1]/private', 'ftp://origin.example/file']) {
+      let requests = 0, released = 0;
+      globalThis.fetch = async () => { requests++; return new Response(new ReadableStream({ cancel() { released++; } }), { status: 302, headers: { Location: target } }); };
+      const response = await worker.fetch(new Request(signedUrl('https://origin.example/file')), environment);
+      assert.equal(response.status, 502);
+      assert.equal(requests, 1);
+      assert.equal(released, 1);
+    }
+  } finally { console.error = originalError; }
+});
+
+test('redirect loops are bounded like fetch and release every intermediate response', async () => {
+  let requests = 0, released = 0;
+  globalThis.fetch = async () => { requests++; return new Response(new ReadableStream({ cancel() { released++; } }), { status: 308, headers: { Location: './again' } }); };
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    const response = await worker.fetch(new Request(signedUrl('https://origin.example/again')), environment);
+    assert.equal(response.status, 502);
+    assert.equal(requests, 21);
+    assert.equal(released, 21);
+  } finally { console.error = originalError; }
 });

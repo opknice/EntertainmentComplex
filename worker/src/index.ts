@@ -131,6 +131,28 @@ function workerFetchTarget(target: URL): URL {
   return output;
 }
 
+async function fetchMediaUpstream(target: URL, method: string, headers: Headers): Promise<{ response: Response; url: URL }> {
+  let url = target;
+  const forwarded = new Headers(headers);
+  // Match fetch's 20-redirect bound, validating/routing every hop rather than
+  // allowing an automatic redirect to bypass the HTTP-IP transport adapter.
+  for (let redirects = 0; ; redirects += 1) {
+    const request = new Request(workerFetchTarget(url).href, { method, headers: forwarded, redirect: 'manual' });
+    const response = await fetch(request, { cache: 'no-store' });
+    const location = response.headers.get('Location');
+    if (![301, 302, 303, 307, 308].includes(response.status) || !location) return { response, url };
+    await response.body?.cancel();
+    if (redirects >= 20) throw new Error('too many upstream redirects');
+    const next = validatedTarget(new URL(location, url).href);
+    if (next.origin !== url.origin) {
+      forwarded.delete('Authorization');
+      forwarded.delete('Proxy-Authorization');
+      forwarded.delete('AuthInfo');
+    }
+    url = next;
+  }
+}
+
 async function signUrl(target: URL, payload: MediaPayload, env: Env, requestUrl: URL): Promise<string> {
   const encoded = bytesToBase64Url(textEncoder.encode(JSON.stringify({ ...payload, u: target.href })).buffer);
   const signature = bytesToBase64Url(await hmac(encoded, env.PROXY_SIGNING_KEY));
@@ -273,10 +295,7 @@ async function handleMedia(request: Request, env: Env, requestUrl: URL): Promise
   const accept = request.headers.get('Accept');
   if (accept) upstreamHeaders.set('Accept', accept);
 
-  const fetchTarget = workerFetchTarget(target);
-  const upstreamRequest = new Request(fetchTarget.href, { method: request.method, headers: upstreamHeaders, redirect: 'follow' });
-  if (payload.h?.Origin) upstreamRequest.headers.set('Origin', payload.h.Origin);
-  const upstream = await fetch(upstreamRequest, { cache: 'no-store' });
+  const { response: upstream, url: upstreamUrl } = await fetchMediaUpstream(target, request.method, upstreamHeaders);
   const contentType = upstream.headers.get('Content-Type')?.toLowerCase() || '';
   const isManifest = contentType.includes('mpegurl') || /\.m3u8(?:$|\?)/i.test(target.href);
   const mayContainManifest = contentType.startsWith('text/plain') || /\.txt(?:$|\?)/i.test(target.href);
@@ -294,7 +313,9 @@ async function handleMedia(request: Request, env: Env, requestUrl: URL): Promise
     return new Response(inspected.body, { status: upstream.status, headers });
   }
   const manifest = await readBoundedText(new Response(inspected.body, { headers: upstream.headers }));
-  const manifestUrl = new URL(upstream.url || target.href);
+  // Relative resource URLs belong to the final upstream URL, not the DNS alias
+  // used only to transport public HTTP-IP requests through Cloudflare.
+  const manifestUrl = upstreamUrl;
   if (dashBody) {
     const origins = dashResourceOrigins(manifest, manifestUrl).map((origin) => validatedTarget(`${origin}/`).origin);
     const resourcePayload = { ...payload, o: [...new Set([...(payload.o || []), ...origins])] };
