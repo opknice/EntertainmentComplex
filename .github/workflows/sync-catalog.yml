@@ -2,7 +2,7 @@ name: Sync entertainment catalog
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '7,22,37,52 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -47,4 +47,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data public/data
           git commit -m "Update entertainment catalog"
+          git pull --rebase origin main
           git push
+
+      - name: Verify sports were refreshed from every source
+        run: node scripts/check-sports-sync.mjs

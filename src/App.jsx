@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom';
 import { useOttCatalog } from './useOttCatalog';
 import StreamPlayer from './StreamPlayer';
 import { isVideoFullscreen, leaveVideoFullscreen, startVideoPresentation } from './player-presentation';
+import { isRelevantSport, sportTimestamp } from '../lib/sports-catalog';
 
 const PAGE_SIZE = 30;
 const POLL_INTERVAL_MS = 15 * 60 * 1000;
@@ -28,7 +29,7 @@ function formatSyncTime(value) {
 
 function formatEventTime(value) {
   if (!value) return 'รอประกาศเวลาแข่งขัน';
-  const date = new Date(value.replace(' ', 'T'));
+  const date = new Date(sportTimestamp(value));
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat('th-TH', {
     weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
@@ -131,9 +132,14 @@ function useCatalog() {
   const [syncNotice, setSyncNotice] = useState('');
   const [manualState, setManualState] = useState('idle');
   const versionRef = useRef('');
+  const liveSportsRef = useRef(null);
 
   const applyCatalog = (data) => {
     const next = { ...emptyCatalog, ...data, live: data.live || [], sports: data.sports || [], recent: data.recent || [] };
+    const liveSports = liveSportsRef.current;
+    if (liveSports && Date.parse(liveSports.sportsHealth.checkedAt) > Date.parse(next.sportsHealth?.checkedAt || next.generatedAt || 0)) {
+      Object.assign(next, liveSports);
+    }
     versionRef.current = next.version;
     setCatalog(next);
     return next;
@@ -147,6 +153,39 @@ function useCatalog() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  // Fetch the live fixture snapshot independently of GitHub's delayed scheduler
+  // and the static-site build. One shared CDN snapshot is cached for 60 seconds.
+  useEffect(() => {
+    if (loading) return undefined;
+    let cancelled = false, running = false;
+    const controller = new AbortController();
+    const refreshSports = async () => {
+      if (running || document.hidden) return;
+      running = true;
+      try {
+        const response = await fetch('/api/sports-catalog', { signal: controller.signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const result = await response.json();
+        if (!Array.isArray(result.sports) || !result.sportsHealth?.checkedAt) throw new Error('invalid sports snapshot');
+        if (!cancelled) setCatalog(current => {
+          const failed = new Set(result.sportsHealth.failedSources || []);
+          const fallback = current.sports.filter(item => failed.has(item.sport) && isRelevantSport(item));
+          const sports = [...result.sports, ...fallback].sort((a, b) => (sportTimestamp(a.time) || 0) - (sportTimestamp(b.time) || 0));
+          const update = { sports, sportsTotal: sports.length, sportsHealth: { ...result.sportsHealth, fallbackCount: fallback.length } };
+          liveSportsRef.current = update;
+          return { ...current, ...update };
+        });
+      } catch {
+        if (!cancelled) setCatalog(current => ({ ...current, sportsHealth: { ...current.sportsHealth, degraded: true } }));
+      } finally { running = false; }
+    };
+    refreshSports();
+    const timer = window.setInterval(refreshSports, 60000);
+    window.addEventListener('online', refreshSports);
+    document.addEventListener('visibilitychange', refreshSports);
+    return () => { cancelled = true; controller.abort(); window.clearInterval(timer); window.removeEventListener('online', refreshSports); document.removeEventListener('visibilitychange', refreshSports); };
+  }, [loading]);
 
   useEffect(() => {
     let cancelled = false;
@@ -193,7 +232,10 @@ function useCatalog() {
         const createdAt = status.run?.createdAt ? new Date(status.run.createdAt).getTime() : 0;
         if (createdAt + 2000 < requestedAt || status.run?.status !== 'completed') continue;
         if (status.run.conclusion !== 'success') throw new Error(`workflow ${status.run.conclusion || 'failed'}`);
-        const next = applyCatalog(await fetchJson('/data/catalog.json'));
+        const published = await fetchJson('/data/catalog.json');
+        // A successful Actions run can precede the Vercel deployment.
+        if (Date.parse(published.sportsHealth?.checkedAt || published.generatedAt) + 2000 < requestedAt) continue;
+        const next = applyCatalog(published);
         setManualState('cooldown');
         setSyncNotice(`อัปเดตแล้ว · หนัง ${next.total.toLocaleString('th-TH')} · ทีวี ${next.liveTotal.toLocaleString('th-TH')} · กีฬา ${next.sportsTotal.toLocaleString('th-TH')} · OTT ${next.ottTotal.toLocaleString('th-TH')}`);
         window.setTimeout(() => setManualState('idle'), 5 * 60 * 1000);

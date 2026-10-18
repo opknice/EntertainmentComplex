@@ -1,4 +1,5 @@
 import { dashResourceOrigins } from './dash.ts';
+import { SPORTS_FEEDS, SPORTS_HEADERS, SPORTS_ORIGIN } from '../../lib/sports-catalog.js';
 
 const MAX_MANIFEST_BYTES = 5 * 1024 * 1024;
 const textEncoder = new TextEncoder();
@@ -336,6 +337,14 @@ export default {
     try {
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(request, env) });
       if (url.pathname === '/health' && request.method === 'GET') return jsonResponse(request, env, { ok: true, service: 'doowiseplay-proxy' });
+        if (url.pathname === '/v1/sports-feed' && request.method === 'GET') {
+          const feed = url.searchParams.get('feed') || '';
+          if (!Object.hasOwn(SPORTS_FEEDS, feed)) return jsonResponse(request, env, { error: 'invalid sports feed' }, 400);
+          const upstream = await fetch(`${SPORTS_ORIGIN}${SPORTS_FEEDS[feed]}`, { headers: SPORTS_HEADERS, signal: AbortSignal.timeout(15000), cf: { cacheEverything: true, cacheTtl: 60 } });
+          if (!upstream.ok) return jsonResponse(request, env, { error: 'sports feed unavailable' }, upstream.status);
+          const data = JSON.parse(await readBoundedText(upstream));
+          return jsonResponse(request, env, data);
+        }
       if (url.pathname !== '/v1/media' || !['GET', 'HEAD'].includes(request.method)) return jsonResponse(request, env, { error: 'not found' }, 404);
       return await handleMedia(request, env, url);
     } catch (error) {

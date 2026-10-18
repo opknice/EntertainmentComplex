@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'csv-parse/sync';
 import { cleanupOttGenerations, syncOttCatalog } from './ott-catalog.mjs';
+import { fetchSportsCatalog, publicSportItems } from '../lib/sports-catalog.js';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dataDir = path.join(rootDir, 'data');
@@ -16,24 +17,8 @@ const versionPath = path.join(publicDataDir, 'version.json');
 const localEnvPath = path.join(rootDir, '.env.local');
 const upstreamBase = 'https://dws-license.thmirror2.workers.dev';
 const defaultUserAgent = 'Doowiseplay-Android/1.0';
-const sportsUserAgent = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36';
 const monitoredSources = ['77hd.m3u', 'ottmovie-series.m3u', 'playlistnolog.m3u', 'movie285_all.m3u'];
 const liveSourceName = 'converted_playlist.m3u';
-const sportsBase = 'https://atmflix.live';
-const sportsFeeds = [
-  ['football', '/api/fixtures/date'],
-  ['volleyball', '/api/volleyball/fixtures'],
-  ['hockey', '/api/hockey/fixtures'],
-  ['nfl', '/api/nfl/fixtures'],
-];
-const sportsLookbackMs = 8 * 60 * 60 * 1000;
-const sportsLookaheadMs = 48 * 60 * 60 * 1000;
-const sportsHeaders = {
-  'User-Agent': sportsUserAgent,
-  Origin: sportsBase,
-  Referer: `${sportsBase}/`,
-  Accept: 'application/json',
-};
 
 loadLocalEnv();
 
@@ -306,96 +291,14 @@ async function fetchLiveChannels(source) {
   return parseLivePlaylist(await response.text(), source);
 }
 
-function flattenFixturePayload(payload) {
-  if (Array.isArray(payload)) return payload;
-  if (!payload || typeof payload !== 'object') return [];
-  return Object.values(payload).flatMap((value) => Array.isArray(value) ? value : []);
-}
-
-function sportTimestamp(value) {
-  const text = String(value || '').trim();
-  if (!text) return Number.NaN;
-  const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text)
-    ? text.replace(' ', 'T')
-    : `${text.replace(' ', 'T')}+07:00`;
-  return Date.parse(normalized);
-}
-
-function isRelevantSport(item, now = Date.now()) {
-  if (['FT', 'Finished', 'Cancelled', 'Canceled', 'Postponed'].includes(String(item.status || ''))) return false;
-  const timestamp = sportTimestamp(item.time);
-  return !Number.isFinite(timestamp) || (timestamp >= now - sportsLookbackMs && timestamp <= now + sportsLookaheadMs);
-}
-
 async function fetchSports(previousSports = []) {
-  const results = [];
-  const failures = [];
-  let fallbackCount = 0;
-  for (const [sport, pathname] of sportsFeeds) {
-    try {
-      const response = await fetch(`${sportsBase}${pathname}`, {
-        headers: sportsHeaders,
-        signal: AbortSignal.timeout(30_000),
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      for (const item of flattenFixturePayload(await response.json())) {
-        const home = item.teamhome?.name_th || item.teamhome?.name || '';
-        const away = item.teamaway?.name_th || item.teamaway?.name || '';
-        const channel = String(item.channel || '').trim();
-        if (!channel) continue;
-        const title = `${home} vs ${away}`.trim().replace(/^vs$|^\s*vs\s*/i, '') || String(item.title || channel);
-        const league = item.league_info?.name_th || item.league_info?.name || String(item.league_round || sport).split(' - ')[0];
-        results.push({
-          id: stableMovieId(`${sport}:${title}:${item.event_time || ''}`, channel),
-          title,
-          sport,
-          league: league || sport,
-          time: String(item.event_time || ''),
-          status: String(item.status_short || ''),
-          channel,
-          logo: item.teamhome?.logo || '',
-          awayLogo: item.teamaway?.logo || '',
-        });
-      }
-    } catch (error) {
-      const fallback = previousSports.filter((item) => item.sport === sport && isRelevantSport(item));
-      console.warn(`โหลดตารางกีฬา ${sport} ไม่สำเร็จ (${error.message}); ใช้ข้อมูลเดิม ${fallback.length} รายการ`);
-      failures.push({ source: sport, reason: error.message });
-      fallbackCount += fallback.length;
-      results.push(...fallback);
-    }
-  }
-  try {
-    const eventsResponse = await fetch(`${sportsBase}/api/events`, {
-      headers: sportsHeaders,
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!eventsResponse.ok) throw new Error(`HTTP ${eventsResponse.status}`);
-    for (const item of await eventsResponse.json()) {
-      const channel = String(item.channel || '').trim();
-      if (!channel) continue;
-      results.push({
-        id: stableMovieId(`event:${item.title}:${item.start || ''}`, channel),
-        title: String(item.title || channel),
-        sport: 'event',
-        league: 'อีเวนต์',
-        time: String(item.start || ''),
-        status: '',
-        channel,
-        logo: String(item.thumbnail || ''),
-        awayLogo: '',
-      });
-    }
-  } catch (error) {
-    const fallback = previousSports.filter((item) => item.sport === 'event' && isRelevantSport(item));
-    console.warn(`โหลดอีเวนต์กีฬาไม่สำเร็จ (${error.message}); ใช้ข้อมูลเดิม ${fallback.length} รายการ`);
-    failures.push({ source: 'event', reason: error.message });
-    fallbackCount += fallback.length;
-    results.push(...fallback);
-  }
-  const items = [...new Map(results.filter((item) => isRelevantSport(item)).map((item) => [`${item.channel}\u0000${item.time}\u0000${item.title}`, item])).values()]
-    .sort((a, b) => a.time.localeCompare(b.time) || a.sport.localeCompare(b.sport));
-  return { items, failures, fallbackCount };
+  return fetchSportsCatalog({ previousSports, loadFeed: async feed => {
+    // The existing Worker can reach the feed from regions where hosted runners
+    // receive 403. Only these five fixed public fixture endpoints are requested.
+    const response = await fetch(`${proxyBaseUrl}/v1/sports-feed?feed=${feed}`, { signal: AbortSignal.timeout(25000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  } });
 }
 
 function signPlayUrl(movie, expiresAt) {
@@ -467,13 +370,14 @@ async function main() {
   const [liveChannels, sportsResult, ottSummary] = await Promise.all([fetchLiveChannels(sourceList.live.name), fetchSports(previousCatalog.sports), syncOttCatalog({ rootDir, signPlayUrl, proxyBaseUrl })]);
   const sports = sportsResult.items;
   const sportsHealth = {
+    checkedAt: new Date().toISOString(),
     degraded: sportsResult.failures.length > 0,
     failedSources: sportsResult.failures.map((failure) => failure.source),
     fallbackCount: sportsResult.fallbackCount,
   };
   const contentHash = catalogHash(
     [...movies, ...liveChannels, ...sports.map((item) => ({ ...item, url: item.channel, referer: '', logo: `${item.logo}|${item.awayLogo}` }))],
-    JSON.stringify({ sportsHealth, ottVersion: ottSummary.version, ottDegraded: ottSummary.degraded }),
+    JSON.stringify({ sportsHealth: { ...sportsHealth, checkedAt: undefined }, ottVersion: ottSummary.version, ottDegraded: ottSummary.degraded }),
   );
   const now = Date.now();
   const linksNeedRotation = previousVersion?.catalogHash !== contentHash
@@ -510,13 +414,7 @@ async function main() {
     streamType: /\.mpd(?:$|\?)/i.test(channel.url) ? 'DASH' : /\.m3u8(?:$|\?)/i.test(channel.url) ? 'HLS' : 'สตรีมสด',
     playUrl: signPlayUrl(channel, expiresAt),
   }));
-  const sportItems = sports.map((event) => ({
-    ...event,
-    source: event.league,
-    group: event.sport,
-    streamType: 'HLS',
-    playUrl: `${sportsProxyBaseUrl}?ch=${encodeURIComponent(event.channel)}`,
-  }));
+  const sportItems = publicSportItems(sports, sportsProxyBaseUrl);
   const catalog = { version, generatedAt, total: items.length, liveTotal: live.length, sportsTotal: sportItems.length, ottTotal: ottSummary.total, ottSummary, sportsHealth, sources, groups, recent, items, live, sports: sportItems };
   const versionDocument = linksNeedRotation ? {
     version,
@@ -534,7 +432,7 @@ async function main() {
     changedSources: changedSources.map((source) => source.name),
     added,
     recent,
-  } : previousVersion;
+  } : { ...previousVersion, sportsHealth };
 
   writeAtomic(csvPath, serializeCsv(movies));
   writeAtomic(m3uPath, serializeM3u(movies));

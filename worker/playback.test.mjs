@@ -10,6 +10,18 @@ const originalTimingSafeEqual = crypto.subtle.timingSafeEqual;
 crypto.subtle.timingSafeEqual = timingSafeEqual;
 test.after(() => { globalThis.fetch = originalFetch; crypto.subtle.timingSafeEqual = originalTimingSafeEqual; });
 
+test('public sports feed forwards only fixed fixture endpoints with the source headers', async () => {
+  const requests = [];
+  globalThis.fetch = async (url, options) => { requests.push({ url, options }); return Response.json({ '2026-10-18': [] }); };
+  const ok = await worker.fetch(new Request('https://proxy.example/v1/sports-feed?feed=football&url=https://unrelated.example'), environment);
+  assert.equal(ok.status, 200);
+  assert.equal(requests[0].url, 'https://atmflix.live/api/fixtures/date');
+  assert.equal(requests[0].options.headers.Origin, 'https://atmflix.live');
+  const denied = await worker.fetch(new Request('https://proxy.example/v1/sports-feed?feed=unknown'), environment);
+  assert.equal(denied.status, 400);
+  assert.equal(requests.length, 1);
+});
+
 function signedUrl(source, fields = {}) {
   const payload = Buffer.from(JSON.stringify({ u: source, r: '', a: 'player-test', o: [new URL(source).origin], e: Date.now() + 60000, ...fields })).toString('base64url');
   const signature = createHmac('sha256', environment.PROXY_SIGNING_KEY).update(payload).digest('base64url');
