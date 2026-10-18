@@ -1,0 +1,18 @@
+* { box-sizing: border-box; }
+html, body, #tv-player { width: 100%; height: 100%; margin: 0; background: #000; color: #fff; font-family: Arial, Tahoma, sans-serif; overflow: hidden; }
+#tv-video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+#tv-panel { position: absolute; bottom: 0; left: 0; right: 0; padding: 28px 4%; background: linear-gradient(transparent, rgba(12,4,20,.96) 20%); }
+#tv-panel.is-hidden { opacity: 0; pointer-events: none; }
+.tv-brand { color: #d6a1ff; font-size: 15px; letter-spacing: 2px; }
+h1 { margin: 8px 0; font-size: 30px; }
+#tv-status { min-height: 28px; margin: 8px 0 18px; font-size: 20px; }
+button, select { font-family: inherit; font-size: 21px; color: #fff; background: #22152f; border: 2px solid #70517e; border-radius: 8px; padding: 14px 20px; margin: 4px 10px 8px 0; min-height: 54px; }
+button { cursor: pointer; }
+button:focus, select:focus { outline: 4px solid #fa336c; outline-offset: 3px; background: #4c1c65; }
+#tv-play, #tv-apply { background: #b61850; }
+small, #tv-channel-settings p { color: #d4bddf; font-size: 16px; }
+#tv-channel-settings { padding: 12px 0; }
+#tv-channel-settings label { display: block; font-size: 20px; }
+#tv-channels { width: 48%; max-width: 650px; }
+[hidden] { display: none !important; }
+@media (max-width: 700px) { #tv-panel { padding: 20px; } h1 { font-size: 24px; } button, select { font-size: 17px; padding: 10px; margin-right: 5px; } #tv-channels { width: 100%; } }

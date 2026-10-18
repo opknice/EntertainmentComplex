@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Manu Live · entertainment-complex</title>
+  <link rel="stylesheet" href="/manulive-tv.css">
+  <script defer src="/assets/manulive-tv.js"></script>
+</head>
+<body>
+  <main id="tv-player">
+    <video id="tv-video" autoplay playsinline preload="auto" tabindex="-1" aria-label="วิดีโอถ่ายทอดสด"></video>
+    <section id="tv-panel" aria-label="ควบคุมการรับชม">
+      <span class="tv-brand">entertainment-complex · MANU LIVE</span>
+      <h1 id="tv-title">กำลังโหลดช่อง…</h1>
+      <p id="tv-status" role="status">กำลังตรวจช่องล่าสุดจากคลัง</p>
+      <div class="tv-buttons">
+        <button id="tv-play" autofocus>▶ เล่น / หยุด</button>
+        <button id="tv-fullscreen">เต็มจอ</button>
+        <button id="tv-retry">เชื่อมต่อใหม่</button>
+        <button id="tv-change">เปลี่ยนช่อง</button>
+      </div>
+      <div id="tv-channel-settings" hidden>
+        <label for="tv-channels">เลือกช่องสำหรับทีวีเครื่องนี้</label>
+        <select id="tv-channels"></select>
+        <button id="tv-apply">รับชมช่องที่เลือก</button>
+        <button id="tv-default">กลับช่องหลัก</button>
+        <p>จำช่องที่เลือกเฉพาะเครื่องนี้ ลิงก์ /manulive ยังคงเดิม</p>
+      </div>
+      <small>กด OK เพื่อเล่น · ปุ่มลูกศรเลือกคำสั่ง · ถ้าภาพยังไม่เริ่ม ให้กดเล่นหนึ่งครั้ง</small>
+    </section>
+  </main>
+  <noscript>กรุณาเปิด JavaScript ในเบราว์เซอร์ทีวีเพื่อรับชม</noscript>
+</body>
+</html>

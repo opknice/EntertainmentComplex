@@ -1,5 +1,7 @@
 {
   "rewrites": [
+    { "source": "/manulive", "destination": "/manulive.html" },
+    { "source": "/manulive/", "destination": "/manulive.html" },
     { "source": "/category/:path*", "destination": "/index.html" },
     { "source": "/details/:path*", "destination": "/index.html" },
     { "source": "/watch/:path*", "destination": "/index.html" }
