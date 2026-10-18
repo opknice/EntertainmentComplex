@@ -15,7 +15,8 @@ export default function StreamPlayer({ item, mediaRef, autoFullscreen = false })
   };
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !item) return undefined;
+    if (!video) return undefined;
+    if (!item) return () => { video.pause(); video.removeAttribute('src'); video.load(); };
     const previousCleanup = cleanupDone.current;
     const controller = new AbortController();
     let hls, shakaPlayer, transportPlayer;
