@@ -434,7 +434,7 @@ function WatchPage({ catalog, section, id, loading }) {
   return (
     <main className="site-main watch-page">
       <Breadcrumbs items={[['หน้าแรก', '/'], [sections[section].label, `/category/${section}`], [title, `/details/${section}/${encodeURIComponent(id)}`], ['เครื่องเล่น']]} />
-      <section className="watch-shell"><div className="watch-heading"><div><span className="eyebrow">NOW PLAYING</span><h1>{title}</h1></div><Link className="secondary-button" to={`/details/${section}/${encodeURIComponent(id)}`}>← รายละเอียด</Link></div><StreamPlayer item={item} /></section>
+      <section className="watch-shell"><div className="watch-heading"><div><span className="eyebrow">NOW PLAYING</span><h1>{title}</h1></div><Link className="secondary-button" to={`/details/${section}/${encodeURIComponent(id)}`}>← รายละเอียด</Link></div><StreamPlayer key={item.id} item={item} resumeId={section === 'movies' || section === 'ott' ? `${section}:${item.id}` : undefined} live={section === 'live' || section === 'sports' || item.kind === 'live'} /></section>
       <div className="watch-help"><span>ไม่มีโฆษณา</span><p>หากวิดีโอไม่เริ่มอัตโนมัติ ให้กดปุ่มเล่นหนึ่งครั้ง เนื่องจากนโยบาย autoplay ของเบราว์เซอร์</p></div>
     </main>
   );
@@ -444,13 +444,15 @@ function PlayerOverlay({ selection, onClose, mediaRef }) {
   const { item, section } = selection;
   const title = displayTitle(item);
   return (
-    <section className="fullscreen-player" role="dialog" aria-modal="true" aria-label={`กำลังรับชม ${title}`}>
-      <header className="fullscreen-player-head">
-        <div><span className="eyebrow">NOW PLAYING · {sections[section].label}</span><h2>{title}</h2></div>
-        <button type="button" onClick={onClose} aria-label="ปิดเครื่องเล่น" autoFocus>×</button>
-      </header>
-      <div className="fullscreen-player-stage"><StreamPlayer key={item.id} item={item.playUrl ? item : null} mediaRef={mediaRef} autoFullscreen /></div>
-      <p className="fullscreen-player-help">กด Esc หรือปุ่ม × เพื่อกลับไปยังรายการเดิม · ไม่มีโฆษณาคั่น</p>
+    <section className="fullscreen-player" role="dialog" aria-modal="true" aria-label={`กำลังรับชม ${title}`} onKeyDown={event => {
+      if (event.key !== 'Tab') return;
+      const focusable = [...event.currentTarget.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]')].filter(element => element.getClientRects().length > 0);
+      const first = focusable[0], last = focusable.at(-1);
+      if (!first) return;
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }}>
+      <div className="fullscreen-player-stage"><StreamPlayer key={item.id} item={item.playUrl ? item : null} mediaRef={mediaRef} autoFullscreen resumeId={section === 'movies' || section === 'ott' ? `${section}:${item.id}` : undefined} live={section === 'live' || section === 'sports' || item.kind === 'live'} onClose={onClose} /></div>
     </section>
   );
 }
@@ -487,8 +489,10 @@ export default function App() {
   const [activePlayer, setActivePlayer] = useState(null);
   const overlayVideoRef = useRef(null);
   const playRequestRef = useRef(0);
+  const previousFocusRef = useRef(null);
   const openPlayer = async (item, section) => {
     const requestId = ++playRequestRef.current;
+    previousFocusRef.current = document.activeElement;
     setPlayError('');
     // Mount the video during the user's tap, including while OTT details load.
     flushSync(() => setActivePlayer({ item, section }));
@@ -512,8 +516,11 @@ export default function App() {
   }, [ottRouteItem?.id, ottRouteItem?.playUrl, ott.loadVisible]);
   const pageLoading = loading || (route.section === 'ott' && (ott.loading || Boolean(ottRouteItem && !ottRouteItem.playUrl && !ott.error)));
   const closePlayer = () => {
-    ++playRequestRef.current;
-    leaveVideoFullscreen(overlayVideoRef.current);
+    const requestId = ++playRequestRef.current;
+    const previousFocus = previousFocusRef.current;
+    leaveVideoFullscreen(overlayVideoRef.current).then(() => {
+      if (playRequestRef.current === requestId && previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+    });
     setActivePlayer(null);
   };
 

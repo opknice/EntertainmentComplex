@@ -72,3 +72,41 @@ test('unsupported and synchronously throwing APIs remain recoverable', async () 
   assert.deepEqual(await startVideoPresentation(video), { playing: false, fullscreenAccepted: false });
   await leaveVideoFullscreen(null);
 });
+
+test('fullscreen includes the player surface and its custom controls, not just the video or the whole page', async () => {
+  const document = { fullscreenEnabled: true, exitFullscreen() { this.fullscreenElement = null; } };
+  const surface = { requestFullscreen() { document.fullscreenElement = this; } };
+  const video = { ownerDocument: document, closest(selector) { assert.equal(selector, '[data-player-surface]'); return surface; } };
+  assert.equal(await enterVideoFullscreen(video), true);
+  assert.equal(document.fullscreenElement, surface);
+  assert.equal(isVideoFullscreen(video), true);
+  await leaveVideoFullscreen(video);
+  assert.equal(document.fullscreenElement, null);
+});
+
+test('devices without element fullscreen can use native video presentation after metadata', async () => {
+  let native = 0;
+  const video = { ownerDocument: { fullscreenEnabled: false }, readyState: 1, closest: () => ({ requestFullscreen() { throw new Error('unsupported'); } }), webkitEnterFullscreen() { native++; } };
+  assert.equal(await enterVideoFullscreen(video), true);
+  assert.equal(native, 1);
+});
+
+test('a pending resume decision allows fullscreen but never starts playback before consent', async () => {
+  let played = 0, fullscreen = 0;
+  const video = { dataset: { playbackBlocked: 'true' }, ownerDocument: {}, play() { played++; }, requestFullscreen() { fullscreen++; } };
+  assert.deepEqual(await startVideoPresentation(video), { playing: false, fullscreenAccepted: true });
+  assert.equal(played, 0); assert.equal(fullscreen, 1);
+  video.dataset.playbackBlocked = 'false';
+  assert.deepEqual(await startVideoPresentation(video, false), { playing: true, fullscreenAccepted: true });
+  assert.equal(played, 1);
+});
+
+test('native-only fullscreen cannot hide the pending resume choice', async () => {
+  let native = 0;
+  const video = { dataset: { playbackBlocked: 'true' }, readyState: 1, ownerDocument: { fullscreenEnabled: false }, webkitEnterFullscreen() { native++; } };
+  assert.equal(await enterVideoFullscreen(video), false);
+  assert.equal(native, 0);
+  video.dataset.playbackBlocked = 'false';
+  assert.equal(await enterVideoFullscreen(video), true);
+  assert.equal(native, 1);
+});

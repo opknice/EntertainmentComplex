@@ -1,42 +1,64 @@
 import { useEffect, useRef, useState } from 'react';
 import { detectStreamType, highestHlsConfig, highestQualityIndex, highestShakaConfig, lockHlsToHighest, lockShakaToHighest, playable, playbackErrorMessage, proxyResourceUrl, sourceUrl } from './playback';
-import { isVideoFullscreen, startVideoPresentation } from './player-presentation';
+import { startVideoPresentation } from './player-presentation';
+import PlayerControls from './PlayerControls';
+import { usePlaybackProgress } from './usePlaybackProgress';
+import ResumePrompt from './ResumePrompt';
 
-export default function StreamPlayer({ item, mediaRef, autoFullscreen = false }) {
+export default function StreamPlayer({ item, mediaRef, autoFullscreen = false, live = false, resumeId, onClose }) {
   const internalVideoRef = useRef(null);
   const videoRef = mediaRef || internalVideoRef;
+  const surfaceRef = useRef(null);
   const cleanupDone = useRef(Promise.resolve());
   const [status, setStatus] = useState('กำลังเตรียมเครื่องเล่น…');
   const [resolution, setResolution] = useState('');
   const [actionRequired, setActionRequired] = useState('');
-  const applyPresentation = ({ playing, fullscreenAccepted }) => {
-    setActionRequired(!playing ? 'play' : !fullscreenAccepted ? 'fullscreen' : '');
+  const [nativePresentation, setNativePresentation] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const applyPresentation = ({ playing }) => {
+    setActionRequired(playing ? '' : 'play');
     if (!playing) setStatus('แตะปุ่มเล่นเพื่อเริ่มรับชม');
   };
+  const startPlayback = () => {
+    const video = videoRef.current;
+    setStatus('กำลังเริ่มรับชม…');
+    startVideoPresentation(video, autoFullscreen).then(result => { if (video.isConnected && videoRef.current === video) applyPresentation(result); });
+  };
+  const progress = usePlaybackProgress(videoRef, resumeId, live, startPlayback);
+  useEffect(() => {
+    const video = videoRef.current;
+    const begin = () => setNativePresentation(true), end = () => setNativePresentation(false);
+    video.addEventListener('webkitbeginfullscreen', begin);
+    video.addEventListener('webkitendfullscreen', end);
+    return () => { video.removeEventListener('webkitbeginfullscreen', begin); video.removeEventListener('webkitendfullscreen', end); };
+  }, [videoRef]);
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return undefined;
+    progress.loading();
     if (!item) return () => { video.pause(); video.removeAttribute('src'); video.load(); };
     const previousCleanup = cleanupDone.current;
     const controller = new AbortController();
     let hls, shakaPlayer, transportPlayer;
     let cancelled = false;
+    let terminalError = false;
     let cancelReadiness = () => {};
     let lastHttpStatus;
     setStatus('กำลังโหลดคุณภาพสูงสุดจากต้นทาง…');
     setResolution('');
     setActionRequired('');
+    setFailed(false);
     const updateResolution = () => {
       if (!cancelled && video.videoWidth) setResolution(video.videoWidth + '×' + video.videoHeight);
     };
     const playing = () => {
       updateResolution();
-      if (!cancelled) {
+      if (!cancelled && !terminalError) {
         setStatus('กำลังเล่น');
-        setActionRequired(autoFullscreen && !isVideoFullscreen(video) ? 'fullscreen' : '');
+        setActionRequired('');
       }
     };
-    const waiting = () => { if (!cancelled) setStatus('กำลังบัฟเฟอร์คุณภาพสูงสุด…'); };
+    const waiting = () => { if (!cancelled && !terminalError) setStatus('กำลังบัฟเฟอร์คุณภาพสูงสุด…'); };
     video.addEventListener('resize', updateResolution);
     video.addEventListener('loadedmetadata', updateResolution);
     video.addEventListener('playing', playing);
@@ -52,6 +74,8 @@ export default function StreamPlayer({ item, mediaRef, autoFullscreen = false })
       const fatal = new Promise((_resolve, reject) => { rejectFatal = reject; });
       const fail = (error) => {
         if (cancelled) return;
+        terminalError = true;
+        setFailed(true);
         setStatus(playbackErrorMessage(error));
         rejectFatal(error);
       };
@@ -139,6 +163,7 @@ export default function StreamPlayer({ item, mediaRef, autoFullscreen = false })
       await Promise.race([Promise.all([ready, load()]), fatal]);
       if (!cancelled) {
         updateResolution();
+        if (!progress.ready()) { setStatus('เลือกรับชมต่อหรือเริ่มใหม่'); return; }
         setStatus(video.paused ? 'พร้อมเล่น · คุณภาพสูงสุด' : 'กำลังเล่น');
         startVideoPresentation(video, autoFullscreen).then((result) => { if (!cancelled) applyPresentation(result); });
       }
@@ -146,6 +171,8 @@ export default function StreamPlayer({ item, mediaRef, autoFullscreen = false })
     setup().catch((error) => {
       cancelReadiness();
       if (cancelled) return;
+      terminalError = true;
+      setFailed(true);
       hls?.stopLoad();
       transportPlayer?.unload();
       cleanupDone.current = Promise.resolve(shakaPlayer?.unload()).catch(() => {});
@@ -166,8 +193,8 @@ export default function StreamPlayer({ item, mediaRef, autoFullscreen = false })
       video.load();
     };
   }, [item, autoFullscreen]);
-  return <><div className="video-frame"><video ref={videoRef} controls autoPlay playsInline preload="auto" poster={item?.logo || undefined} />{actionRequired && <button className="player-start primary-button" type="button" onClick={() => {
-    const video = videoRef.current;
-    startVideoPresentation(video, autoFullscreen).then((result) => { if (video.isConnected && videoRef.current === video) applyPresentation(result); });
-  }}>{actionRequired === 'fullscreen' ? '⛶ เต็มจอ' : autoFullscreen ? '▶ เล่นเต็มจอ' : '▶ เล่นวิดีโอ'}</button>}</div><div className="player-status"><span className="status-dot" /><span>{status}</span><b className="video-quality" aria-label="คุณภาพวิดีโอ" aria-live="polite">{resolution || 'ต้นฉบับสูงสุด'}</b></div></>;
+  return <div ref={surfaceRef} className="video-frame player-surface" data-player-surface="" tabIndex={0} role="group" aria-label="เครื่องเล่นวิดีโอ">
+    <video ref={videoRef} data-playback-blocked={progress.blocked ? 'true' : 'false'} controls={nativePresentation} autoPlay={!progress.blocked} playsInline preload="auto" poster={item?.logo || undefined} />
+    {progress.blocked && item ? <ResumePrompt progress={progress} loadError={failed ? status : ''} onClose={onClose} /> : <PlayerControls videoRef={videoRef} surfaceRef={surfaceRef} item={item} live={live} autoFullscreen={autoFullscreen} status={status} saveWarning={progress.warning} failed={failed} resolution={resolution} actionRequired={actionRequired} onClose={onClose} onStart={startPlayback} />}
+  </div>;
 }

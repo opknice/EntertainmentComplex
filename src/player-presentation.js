@@ -1,17 +1,24 @@
+function fullscreenTarget(video) {
+  return video?.closest?.('[data-player-surface]') || video;
+}
+
 export function isVideoFullscreen(video) {
   if (!video) return false;
   const document = video.ownerDocument;
-  return document?.fullscreenElement === video || document?.webkitFullscreenElement === video || Boolean(video.webkitDisplayingFullscreen);
+  const target = fullscreenTarget(video);
+  return document?.fullscreenElement === target || document?.webkitFullscreenElement === target || document?.fullscreenElement === video || document?.webkitFullscreenElement === video || Boolean(video.webkitDisplayingFullscreen);
 }
 
 export function enterVideoFullscreen(video) {
   if (!video) return Promise.resolve(false);
   if (isVideoFullscreen(video)) return Promise.resolve(true);
   try {
-    const request = video.requestFullscreen || video.webkitRequestFullscreen;
-    if (request) return Promise.resolve(request.call(video, { navigationUI: 'hide' })).then(() => true, () => false);
+    const target = fullscreenTarget(video);
+    const request = target.requestFullscreen || target.webkitRequestFullscreen;
+    if (request && video.ownerDocument?.fullscreenEnabled !== false) return Promise.resolve(request.call(target, { navigationUI: 'hide' })).then(() => true, () => false);
     // iPhone's native video API requires metadata; retry once the stream is ready.
-    if (video.webkitEnterFullscreen && video.readyState >= 1) {
+    // Native video fullscreen hides web dialogs; keep the resume choice visible.
+    if (video.dataset?.playbackBlocked !== 'true' && video.webkitEnterFullscreen && video.readyState >= 1) {
       video.webkitEnterFullscreen();
       return Promise.resolve(true);
     }
@@ -36,7 +43,7 @@ export function startVideoPresentation(video, fullscreen = true) {
   // Both calls happen in the original tap, before any asynchronous catalog work.
   // Start playback first: requesting fullscreen can consume transient activation.
   let playback;
-  try { playback = Promise.resolve(video.play()).then(() => true, () => false); }
+  try { playback = video.dataset?.playbackBlocked === 'true' ? Promise.resolve(false) : Promise.resolve(video.play()).then(() => true, () => false); }
   catch { playback = Promise.resolve(false); }
   const presentation = fullscreen ? enterVideoFullscreen(video) : Promise.resolve(true);
   return Promise.all([playback, presentation]).then(([playing, fullscreenAccepted]) => ({ playing, fullscreenAccepted }));
