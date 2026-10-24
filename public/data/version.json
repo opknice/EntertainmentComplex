@@ -1,12 +1,12 @@
 {
-  "version": "e50979637de1c11bed53-mvmior7t",
-  "catalogHash": "e50979637de1c11bed53",
+  "version": "8c695fdc4d89c0396931-mvmovmga",
+  "catalogHash": "8c695fdc4d89c0396931",
   "proxyBaseUrl": "https://doowiseplay-proxy.kasthanakrit4.workers.dev",
-  "generatedAt": "2026-10-24T14:51:46.505Z",
-  "expiresAt": 1795445506505,
+  "generatedAt": "2026-10-24T17:45:04.618Z",
+  "expiresAt": 1795455904618,
   "total": 13951,
   "liveTotal": 106,
-  "sportsTotal": 218,
+  "sportsTotal": 186,
   "ottTotal": 104396,
   "ottSummary": {
     "version": "c27d933653f167b850e4-mvdsjoi0",
@@ -18,7 +18,7 @@
     "error": "OTT HTTP 500"
   },
   "sportsHealth": {
-    "checkedAt": "2026-10-24T14:51:46.488Z",
+    "checkedAt": "2026-10-24T17:45:04.606Z",
     "degraded": false,
     "failedSources": [],
     "fallbackCount": 0
