@@ -1,12 +1,12 @@
 {
-  "version": "57e47c4e6f4704926130-mvpsqlnp",
-  "catalogHash": "57e47c4e6f4704926130",
+  "version": "f5728dd59741f81d4e0f-mvq08xx8",
+  "catalogHash": "f5728dd59741f81d4e0f",
   "proxyBaseUrl": "https://doowiseplay-proxy.kasthanakrit4.workers.dev",
-  "generatedAt": "2026-10-26T21:56:27.301Z",
-  "expiresAt": 1795643787301,
+  "generatedAt": "2026-10-27T01:26:40.316Z",
+  "expiresAt": 1795656400316,
   "total": 13980,
-  "liveTotal": 98,
-  "sportsTotal": 101,
+  "liveTotal": 96,
+  "sportsTotal": 120,
   "ottTotal": 104396,
   "ottSummary": {
     "version": "c27d933653f167b850e4-mvdsjoi0",
@@ -18,7 +18,7 @@
     "error": "OTT HTTP 500"
   },
   "sportsHealth": {
-    "checkedAt": "2026-10-26T21:56:27.288Z",
+    "checkedAt": "2026-10-27T01:26:40.296Z",
     "degraded": false,
     "failedSources": [],
     "fallbackCount": 0
@@ -29,7 +29,10 @@
     "ottmovie-series.m3u",
     "playlistnolog.m3u"
   ],
-  "changedSources": [],
+  "changedSources": [
+    "ottmovie-series.m3u",
+    "playlistnolog.m3u"
+  ],
   "added": 0,
   "recent": [
     "YhLe2eU4hpbC8an7Np15uU",
