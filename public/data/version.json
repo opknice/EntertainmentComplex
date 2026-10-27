@@ -1,12 +1,12 @@
 {
-  "version": "665c1674f1b15aaca68e-mvqok6vo",
-  "catalogHash": "665c1674f1b15aaca68e",
+  "version": "97684a9d84d2916565b5-mvr0lnp2",
+  "catalogHash": "97684a9d84d2916565b5",
   "proxyBaseUrl": "https://doowiseplay-proxy.kasthanakrit4.workers.dev",
-  "generatedAt": "2026-10-27T12:47:15.924Z",
-  "expiresAt": 1795697235924,
-  "total": 13980,
-  "liveTotal": 96,
-  "sportsTotal": 109,
+  "generatedAt": "2026-10-27T18:24:19.766Z",
+  "expiresAt": 1795717459766,
+  "total": 14007,
+  "liveTotal": 95,
+  "sportsTotal": 111,
   "ottTotal": 104396,
   "ottSummary": {
     "version": "c27d933653f167b850e4-mvdsjoi0",
@@ -18,7 +18,7 @@
     "error": "OTT HTTP 500"
   },
   "sportsHealth": {
-    "checkedAt": "2026-10-27T12:47:15.910Z",
+    "checkedAt": "2026-10-27T18:24:19.746Z",
     "degraded": false,
     "failedSources": [],
     "fallbackCount": 0
@@ -29,9 +29,40 @@
     "ottmovie-series.m3u",
     "playlistnolog.m3u"
   ],
-  "changedSources": [],
-  "added": 0,
+  "changedSources": [
+    "77hd.m3u",
+    "ottmovie-series.m3u",
+    "playlistnolog.m3u"
+  ],
+  "added": 27,
   "recent": [
+    "DNITmHC5NOjHQA3NFn0Hbz",
+    "nKzTBcTCDiWirToi_p8Ghn",
+    "1jY0F7v4nGBhyPOtF_Y0p5",
+    "NQheBHD61Et1UeKn4SaQu3",
+    "DB-KqExQCPX_RWPi10_Dl5",
+    "38Qt1_XUlZluRy-PWFjijA",
+    "nUkZDwEphUooAPo86heoOD",
+    "n6IwucRNRuuFOZ6pfzBDOP",
+    "6UdQjOWyHLC3OSyFrVLJZ0",
+    "ZuIYrlGpHVeQZFZ94r6wMR",
+    "SNaR154DmfJ-mS0L7-hnA7",
+    "YsPoOnk-f8H95comDp_Pne",
+    "pGBJekWbB_kwNqsqYz8sSS",
+    "0U6hlLob48fhS-lNYWe7RJ",
+    "Ecor0DICIimSFrmss2uVIa",
+    "X5u8oBJdYcPEehYS-Pu45Z",
+    "mhKEY8Mbv_r9QRFShBJ0If",
+    "rl1Z3UYmipbzOweQgtTFAi",
+    "mUoTfb5w6QpnHimRyBBpbf",
+    "M7l-mEftsZPr4ob3UsPrA8",
+    "lGgLO_dDY5XeeKa0wv79gX",
+    "YcDz-UjQqYgK0NiLMKUon-",
+    "EN0zjCQvtcvNjgx-FCF33e",
+    "3mmDEzTkVAOjvpbEROV-fT",
+    "gw6XBv780Ct3zoKKFh76oB",
+    "IQecZo1PpUlpqqyH0xSEhk",
+    "jpPlFXaOSQ8oTq6tZlW5zZ",
     "YhLe2eU4hpbC8an7Np15uU",
     "Jdfq_dahpYtWsUc_FROsNf",
     "5wdcQugPSOtYrgpxpCF1tq",
@@ -124,15 +155,6 @@
     "jiIQDMRxREaFYMldxVEmgr",
     "Dq9Zs6Qh8fHCQ3vo3TxmIV",
     "nYO8h5xtR43-9fShg4BjPe",
-    "HyvhgSWuUYLIrGPksfoFad",
-    "gyWW1mN8RirMTAHMjADa-t",
-    "dD3ZXanJoIMd_F7OqelB4C",
-    "0f5MpFArUoeOt49vKYpOcE",
-    "swGMysuDgi78H_wjLBbKSz",
-    "L19DqJig6YLt18OvefVhG0",
-    "dl1zVUu7Hcc6Ip1JGbkle2",
-    "53uaKAIS9dF3ZQmK23g7Do",
-    "a8weaC6ydV3tLySzvIKyh9",
-    "np5UfpQXV_qBY7y6QsZIGA"
+    "HyvhgSWuUYLIrGPksfoFad"
   ]
 }
