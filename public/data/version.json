@@ -1,12 +1,12 @@
 {
-  "version": "b48dbe8a4997364bb5a0-mvunaowo",
-  "catalogHash": "b48dbe8a4997364bb5a0",
+  "version": "7450e7e1c8460338342c-mvv2kb5a",
+  "catalogHash": "7450e7e1c8460338342c",
   "proxyBaseUrl": "https://doowiseplay-proxy.kasthanakrit4.workers.dev",
-  "generatedAt": "2026-10-30T07:22:57.816Z",
-  "expiresAt": 1795936977816,
-  "total": 14023,
-  "liveTotal": 97,
-  "sportsTotal": 105,
+  "generatedAt": "2026-10-30T14:30:20.782Z",
+  "expiresAt": 1795962620782,
+  "total": 14043,
+  "liveTotal": 91,
+  "sportsTotal": 104,
   "ottTotal": 104396,
   "ottSummary": {
     "version": "c27d933653f167b850e4-mvdsjoi0",
@@ -18,7 +18,7 @@
     "error": "OTT HTTP 500"
   },
   "sportsHealth": {
-    "checkedAt": "2026-10-30T07:22:57.801Z",
+    "checkedAt": "2026-10-30T14:30:20.764Z",
     "degraded": true,
     "failedSources": [
       "event",
@@ -27,7 +27,7 @@
       "nfl",
       "volleyball"
     ],
-    "fallbackCount": 105
+    "fallbackCount": 104
   },
   "sources": [
     "77hd.m3u",
@@ -36,10 +36,31 @@
     "playlistnolog.m3u"
   ],
   "changedSources": [
-    "ottmovie-series.m3u"
+    "ottmovie-series.m3u",
+    "playlistnolog.m3u"
   ],
-  "added": 0,
+  "added": 20,
   "recent": [
+    "jRwWZ2Ke7vOd1g6Zztv42x",
+    "poCadHEwYDLAtup1nY56-k",
+    "U6h2hnL7FsScBaf7cuG-cL",
+    "ftpKK1hriVPKLgeBXUissZ",
+    "h-RAeMuXz-4ccgZyHVn0no",
+    "Fd7hf9G4HW8TZ9vlverIwo",
+    "QTgTCoiJE7xCu6hJS-hl3q",
+    "cka93d1MCyUNeoIldeXRfn",
+    "_x77Z0eACAjsF4zd3n3t6-",
+    "qAycNJuSzd8hmk4lPoTbJJ",
+    "iprKDLziB_X5NcYPXCqYtm",
+    "9LNFjZGtGXaoKshZQUNYOj",
+    "fcdaFqNzAVZ2Oal8S73Qg3",
+    "7BZERuToL1qOvccZY4LDcC",
+    "OkoIX1uOazDa_Fmgy12mrz",
+    "DRZ1R4I-dQ_uF7B4ttDL5-",
+    "TeSN5buoAClV35kCYMn6DY",
+    "JdnDN-sVEbTxXzaMoQSStR",
+    "dYSZfMTRNERukjArDLnUrc",
+    "mWUEpIsegHT7c1GpJWVyV_",
     "9gHm2XHeEf8tBvwruC4AMa",
     "OBtqqen-bShh9SQO6r7nTp",
     "9pQ6n-HiYA33tASQWAKhQQ",
@@ -139,26 +160,6 @@
     "ROlVy974mbMQbbqZH7iOPs",
     "UDZhQ8WOWA3dd5QdAAEuBX",
     "1muyxpPKJTKaPt8A01_2MT",
-    "2avZi27XfIgMRCsjnDw_24",
-    "WU5t3nNl48Bkqf32Nxzd0f",
-    "mmntZpYn3XYTofNIPQVliL",
-    "Zcl1fFjFybFFqV5IKNG98J",
-    "zuM1dd9-9cc7apRE9VWceY",
-    "mj03BvCLl0Ua16C3FSDKFW",
-    "BxHPFHVHPlq0OlfsDHvj6E",
-    "CCadhVr8-_IVIrhHsPCozU",
-    "eJeSKc-2RH9ML80h7IDLx1",
-    "pCy4tMXJmibGgRBiU8Uxsy",
-    "rmgtvDCodyRBZR2cnJVgyH",
-    "5D-I7nVSErIOqFB_qEzUWz",
-    "Lmkkc3wTyDhtvBs-pxdLdB",
-    "K4utSDt8_4IGaVzVr5G3a9",
-    "1jg2R6832ZHNDOGrp8OuVY",
-    "FmYMW9X8Ix37UFMtzkKNJE",
-    "4WOumggESmXQZSpxFc_JTZ",
-    "v1Edj6F14VTXqOnZ4WTfC4",
-    "qcCyyC5uCbXaZ-4z_ZoDMT",
-    "vj_6X_QwckE9QwQhwLiRat",
-    "RXAqA1ukie3gNB8XzDBKxH"
+    "2avZi27XfIgMRCsjnDw_24"
   ]
 }
