@@ -1,12 +1,12 @@
 {
-  "version": "a9f3b8ae27562a89f9c7-mvxyo0uh",
-  "catalogHash": "a9f3b8ae27562a89f9c7",
+  "version": "c564efa85420816d0a7d-mvy211yl",
+  "catalogHash": "c564efa85420816d0a7d",
   "proxyBaseUrl": "https://doowiseplay-proxy.kasthanakrit4.workers.dev",
-  "generatedAt": "2026-11-01T15:04:34.121Z",
-  "expiresAt": 1796137474121,
+  "generatedAt": "2026-11-01T16:38:40.941Z",
+  "expiresAt": 1796143120941,
   "total": 14057,
   "liveTotal": 89,
-  "sportsTotal": 52,
+  "sportsTotal": 45,
   "ottTotal": 104396,
   "ottSummary": {
     "version": "c27d933653f167b850e4-mvdsjoi0",
@@ -18,7 +18,7 @@
     "error": "OTT HTTP 500"
   },
   "sportsHealth": {
-    "checkedAt": "2026-11-01T15:04:34.106Z",
+    "checkedAt": "2026-11-01T16:38:40.929Z",
     "degraded": true,
     "failedSources": [
       "event",
@@ -27,7 +27,7 @@
       "nfl",
       "volleyball"
     ],
-    "fallbackCount": 52
+    "fallbackCount": 45
   },
   "sources": [
     "77hd.m3u",
@@ -35,9 +35,7 @@
     "ottmovie-series.m3u",
     "playlistnolog.m3u"
   ],
-  "changedSources": [
-    "ottmovie-series.m3u"
-  ],
+  "changedSources": [],
   "added": 0,
   "recent": [
     "vJq5uhhMO-va5E-wpgA-7f",
